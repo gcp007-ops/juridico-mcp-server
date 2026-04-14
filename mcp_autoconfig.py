@@ -72,7 +72,8 @@ def register_server(server_name, entry, dry_run=False):
     action = "updated" if existing else "added"
     config["mcpServers"][server_name] = entry
     save_config(config_path, config, dry_run=dry_run)
-    print("[%s] %s." % (server_name, action))
+    if not dry_run:
+        print("[%s] %s." % (server_name, action))
     return action
 
 
