@@ -1,3 +1,9 @@
 __pycache__/
 *.pyc
 .claude/settings.local.json
+
+# uv lockfile — uv nao e o gerenciador oficial deste repo (build-backend
+# e hatchling; sem [tool.uv] em pyproject). Quando alguem usa `uv pip
+# install` localmente, o lockfile aparece untracked. Ignorar previne
+# drift recorrente. Para adotar uv oficialmente: remover esta entrada.
+uv.lock
