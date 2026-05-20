@@ -81,8 +81,25 @@ async def stj_buscar_jurisprudencia(
     NOTA: Usa browser real (nodriver) para contornar Cloudflare.
     Primeira busca demora ~20s. Requer Chrome instalado.
 
+    CRITICO -- BUSCA POR NUMERACAO:
+        Para localizar um processo/acordao pelo numero, passe APENAS digitos
+        sequenciados. NAO usar pontos, hifens, barras ou espacos.
+
+        Errado:  busca="1234567-89.2024.3.00.0000"   (CNJ formatado)
+        Errado:  busca="REsp 1.234.567"              (formato com pontos)
+        Errado:  busca="REsp 1.234.567/SP"           (com UF e barra)
+        Certo:   busca="12345678920243000000"        (CNJ so digitos)
+        Certo:   busca="REsp 1234567"                (classe + digitos)
+        Certo:   busca="1234567"                     (so o numero sequencial)
+
+        Justificativa: o campo "livre" do SCON e match literal/tokenizado;
+        pontuacao quebra o casamento. Use digitos puros para o numero e,
+        opcionalmente, a sigla da classe processual (REsp, AgRg, HC, etc).
+
     Args:
-        busca: Termo de busca livre (ex: "dano moral", "sumula 7")
+        busca: Termo de busca livre (ex: "dano moral", "sumula 7").
+               Para numero de processo/acordao: APENAS digitos, sem
+               pontos/hifens/barras. Ver "CRITICO -- BUSCA POR NUMERACAO".
         base: "ACOR" para acordaos, "MONO" para monocraticas
         data_inicial: Formato DD/MM/AAAA (opcional)
         data_final: Formato DD/MM/AAAA (opcional)
@@ -94,6 +111,8 @@ async def stj_buscar_jurisprudencia(
     Examples:
         - busca="plano de saude reajuste abusivo", base="ACOR"
         - busca="responsabilidade civil objetiva", data_inicial="01/01/2024"
+        - busca="REsp 1234567", base="ACOR"                # numero sem pontos
+        - busca="12345678920243000000", base="ACOR"        # CNJ so digitos
     """
     try:
         client = get_stj()
