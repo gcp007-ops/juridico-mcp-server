@@ -98,7 +98,11 @@ _HEADER_TURMA = re.compile(r"-\s*([^-]*?(?:Turma|Câmara)[^-]*?)\s*-")
 _HEADER_DEJT = re.compile(r"(?:DEJT|DJe|DJ)\s+(\d{1,2}/\d{1,2}/\d{4})")
 _HEADER_AREA = re.compile(r"Área do Direito:\s*([^-\n]+)")
 _DOCCONTENT_JS = "(()=>{const e=document.querySelector('#docContent');return e?e.innerHTML:'__NO_DOC__';})()"
-_TRIBUNAL_JS = "(()=>{const h=document.querySelector('h1.hTitle');return h?h.textContent.trim():'';})()"
+_TRIBUNAL_JS = (
+    "(()=>{const hs=[...document.querySelectorAll('h1.hTitle')]"
+    ".map(e=>(e.textContent||'').trim()).filter(t=>t);"
+    "return hs.length?hs[0]:'';})()"
+)
 
 
 def _meta_do_corpo(html_corpo: str) -> dict:
