@@ -15,7 +15,8 @@ from .clients.cjf import get_client as get_cjf, BASES_CJF
 from .clients.stj import get_client as get_stj
 from .clients.bnp import get_client as get_bnp, TIPOS_PRECEDENTES
 from .clients.tjdft import get_client as get_tjdft, BASES_TJDFT
-from .shared import formatar_resultados_texto
+from .shared import formatar_resultados_texto, ResultadoJuridico
+from .rt import jurisprudencia as rt_juris
 
 mcp = FastMCP("juridico-mcp-server")
 
@@ -238,6 +239,73 @@ def tjdft_buscar_jurisprudencia(
         )
     except Exception as e:
         return f"Erro na busca TJDFT: {e}"
+
+
+# ── RT Online (Prioridade 5) ─────────────────────────────────────────
+
+
+@mcp.tool()
+async def rt_jurisprudencia_buscar(
+    livre: str = "",
+    numero: str = "",
+    relator: str = "",
+    tribunais: str = "",
+    ano: str = "",
+    data_de: str = "",
+    data_ate: str = "",
+    max_resultados: int = 10,
+) -> str:
+    """Busca jurisprudência premium na RT Online (server-only via Chrome dedicado/CDP).
+
+    Pelo menos um de livre/numero/relator é obrigatório. Ano único OU intervalo
+    (data_de/data_ate em dd/mm/aaaa, data de julgamento). Requer RT_CDP_URL.
+
+    Args:
+        livre: Texto livre para busca
+        numero: Número do processo
+        relator: Nome do relator
+        tribunais: Tribunais separados por vírgula
+        ano: Ano de julgamento (ex: "2024")
+        data_de: Data inicial em dd/mm/aaaa (data de julgamento)
+        data_ate: Data final em dd/mm/aaaa (data de julgamento)
+        max_resultados: Limite de resultados (1-50, padrão 10)
+
+    Returns:
+        Acórdãos formatados com número, relator, tribunal, data, JRP e link
+    """
+    if not any(s.strip() for s in (livre, numero, relator)):
+        return "Parametro invalido: informe ao menos livre, numero ou relator."
+    try:
+        regs = await rt_juris.buscar(
+            livre=livre.strip(),
+            numero=numero.strip(),
+            relator=relator.strip(),
+            tribunais=tribunais.strip(),
+            ano=ano.strip(),
+            data_de=data_de.strip(),
+            data_ate=data_ate.strip(),
+            max_resultados=max(1, min(int(max_resultados), 50)),
+        )
+    except Exception as e:
+        return f"Erro na busca RT jurisprudencia: {e}"
+    resultados = [
+        ResultadoJuridico(
+            fonte="rt",
+            tipo="acordao",
+            numero=r["numero_processo"],
+            orgao=r["tribunal"],
+            relator=r["relator"],
+            data=r["data_julgamento"],
+            url=r["url"],
+            extras={
+                "jrp": r.get("jrp"),
+                "veiculo": r.get("veiculo"),
+                "data_publicacao": r.get("data_publicacao"),
+            },
+        )
+        for r in regs
+    ]
+    return formatar_resultados_texto(resultados, titulo="RT Online — Jurisprudência")
 
 
 # ── Metadados ─────────────────────────────────────────────────────────
