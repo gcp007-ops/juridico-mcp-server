@@ -17,6 +17,7 @@ from .clients.bnp import get_client as get_bnp, TIPOS_PRECEDENTES
 from .clients.tjdft import get_client as get_tjdft, BASES_TJDFT
 from .shared import formatar_resultados_texto, ResultadoJuridico
 from .rt import jurisprudencia as rt_juris
+from .rt import delivery as rt_delivery
 
 mcp = FastMCP("juridico-mcp-server")
 
@@ -306,6 +307,26 @@ async def rt_jurisprudencia_buscar(
         for r in regs
     ]
     return formatar_resultados_texto(resultados, titulo="RT Online — Jurisprudência")
+
+
+@mcp.tool()
+def rt_baixar_pdf(doc_url: str, destino: str = "") -> str:
+    """Baixa o PDF de um julgado RT (use a URL de rt_jurisprudencia_buscar)."""
+    import os as _os, json as _json
+    doc_url = (doc_url or "").strip()
+    if not doc_url:
+        return "Parametro invalido: doc_url obrigatoria."
+    try:
+        data, filename = rt_delivery.baixar_documento(doc_url, "PDF")
+    except Exception as e:
+        return _json.dumps({"status": "erro", "mensagem": str(e)}, ensure_ascii=False)
+    pasta = destino.strip() or _os.path.join(
+        _os.environ.get("THINKBOX_VAULT_PATH", ""), "Conhecimento", "Fontes", "Julgados", "RT", "_pdf")
+    _os.makedirs(pasta, exist_ok=True)
+    path = _os.path.join(pasta, filename)
+    with open(path, "wb") as fh:
+        fh.write(data)
+    return _json.dumps({"status": "ok", "path": path, "bytes": len(data), "filename": filename}, ensure_ascii=False)
 
 
 # ── Metadados ─────────────────────────────────────────────────────────
