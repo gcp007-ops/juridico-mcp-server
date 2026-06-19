@@ -33,6 +33,14 @@ def test_escrever_julgado_required_ausente_levanta(tmp_path):
         vault.escrever_julgado({"tribunal": "", "classe": "", "numero": ""}, "corpo", base_path=str(tmp_path))
 
 
+def test_escrever_julgado_sem_vault_path_levanta(monkeypatch):
+    monkeypatch.delenv("THINKBOX_VAULT_PATH", raising=False)
+    with pytest.raises(ValueError, match="THINKBOX_VAULT_PATH"):
+        vault.escrever_julgado(
+            {"tribunal": "TRT-3", "classe": "RO", "numero": "0001"}, "corpo"
+        )
+
+
 def test_escrever_julgado_grava(tmp_path):
     p = pathlib.Path(vault.escrever_julgado(
         {"tribunal": "TRT-3", "classe": "RO", "numero": "0010198-10.2024.5.03.0079",

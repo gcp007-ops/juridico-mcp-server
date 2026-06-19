@@ -22,11 +22,9 @@ def _esc(v: str) -> str:
 
 def montar_frontmatter(meta: dict, pdf_local: str = "") -> str:
     linhas = ["---", "noteType: julgado", 'fonte: "RT Online"', "status: ativo"]
-    for chave, campo in (("tribunal", "tribunal"), ("classe", "classe"), ("numero", "numero"),
-                         ("relator", "relator"), ("orgao_julgador", "orgao_julgador"),
-                         ("assunto", "assunto")):
+    for campo in ("tribunal", "classe", "numero", "relator", "orgao_julgador", "assunto"):
         if meta.get(campo):
-            linhas.append(f'{chave}: "{_esc(meta[campo])}"')
+            linhas.append(f'{campo}: "{_esc(meta[campo])}"')
     if meta.get("data_julgamento"): linhas.append(f'data_julgamento: "{_esc(meta["data_julgamento"])}"')
     if meta.get("data_publicacao"): linhas.append(f'data_publicacao: "{_esc(meta["data_publicacao"])}"')
     if meta.get("jrp"): linhas.append(f'codigo: "{_esc(meta["jrp"])}"')
@@ -41,6 +39,10 @@ def escrever_julgado(meta: dict, corpo_md: str, *, base_path=None, pdf_local: st
     if faltando:
         raise ValueError(f"julgado: campos required ausentes: {', '.join(faltando)}")
     base = base_path or os.environ.get("THINKBOX_VAULT_PATH", "")
+    if not base or not base.strip():
+        raise ValueError(
+            "THINKBOX_VAULT_PATH nao configurado: defina o caminho da vault (server-side) ou passe base_path"
+        )
     pasta = os.path.join(base, *SUBPASTA)
     os.makedirs(pasta, exist_ok=True)
     nome = slug_ascii(meta["numero"])
