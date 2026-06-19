@@ -56,3 +56,8 @@ def test_rt_capturar_md_grava(monkeypatch, tmp_path):
     assert out["status"] == "ok" and out["path"].endswith(".md")
     import pathlib
     assert pathlib.Path(out["path"]).read_text(encoding="utf-8").startswith("---\n")
+
+
+def test_listar_fontes_menciona_rt():
+    txt = server.listar_fontes()
+    assert "rt_jurisprudencia_buscar" in txt and "rt_capturar_md" in txt and "rt_baixar_pdf" in txt

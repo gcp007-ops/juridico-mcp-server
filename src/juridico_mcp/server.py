@@ -382,6 +382,17 @@ def listar_fontes() -> str:
    Sintaxe: Texto livre
    Dados: Ementa, relator, orgao
 
+5. RT Online — server-only via Chrome dedicado/CDP (requer RT_CDP_URL)
+   rt_jurisprudencia_buscar(livre/numero/relator/tribunais/ano/data_de/data_ate)
+     Busca jurisprudencia premium RT: TRTs, TST, STJ, STF e outros tribunais
+   rt_baixar_pdf(doc_url)
+     Baixa o PDF do julgado; grava em THINKBOX_VAULT_PATH se definido
+   rt_capturar_md(doc_url, gravar)
+     Extrai o julgado como Markdown; gravar=True (default) grava nota julgado
+     na vault (requer THINKBOX_VAULT_PATH); gravar=False retorna so o markdown
+   Escopo atual: Jurisprudencia premium. Legislacao/sumulas em versoes futuras.
+   Obs: tools RT degradam sem CDP ativo; fontes httpx (CJF/STJ/BNP/TJDFT) intactas.
+
 NOTA: Cada fonte tem sintaxe de busca DIFERENTE.
 - CJF usa: E, OU, NAO, ADJ, PROX
 - BNP usa: +termo, -termo, "frase"
