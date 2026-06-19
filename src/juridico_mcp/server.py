@@ -310,6 +310,23 @@ async def rt_jurisprudencia_buscar(
 
 
 @mcp.tool()
+def rt_capturar_md(doc_url: str, gravar: bool = True) -> str:
+    """Captura um julgado RT como Markdown (a partir do HTML do documento)."""
+    import json as _json
+    doc_url = (doc_url or "").strip()
+    if not doc_url:
+        return "Parametro invalido: doc_url obrigatoria."
+    try:
+        doc = rt_juris.extrair_documento(doc_url)
+        from .rt import captura_md as _cap
+        corpo_md = _cap.html_para_md(doc["html_corpo"])
+        markdown = corpo_md  # montagem final/gravação entram na Task 6
+    except Exception as e:
+        return _json.dumps({"status": "erro", "mensagem": str(e)}, ensure_ascii=False)
+    return _json.dumps({"status": "ok", "markdown": markdown}, ensure_ascii=False)
+
+
+@mcp.tool()
 def rt_baixar_pdf(doc_url: str, destino: str = "") -> str:
     """Baixa o PDF de um julgado RT (use a URL de rt_jurisprudencia_buscar)."""
     import os as _os, json as _json
