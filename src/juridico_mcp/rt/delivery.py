@@ -19,6 +19,12 @@ _FILENAME_RE = re.compile(r'filename\s*=\s*"?([^";]+)"?', re.I)
 
 _COMPLETE_RE = re.compile(r"<complete>\s*true\s*</complete>", re.I)
 _SUCCESS_RE = re.compile(r"<successful>\s*true\s*</successful>", re.I)
+_DOCGUID_RE = re.compile(r"docguid=([A-Za-z0-9]+)")
+
+
+def _docguid(url: str) -> str | None:
+    m = _DOCGUID_RE.search(url or "")
+    return m.group(1) if m else None
 
 
 def _parse_status_xml(xml: str) -> Tuple[bool, bool]:
@@ -101,6 +107,13 @@ def baixar_documento(doc_url: str, formato: str = "PDF", *,
         vars_ = json.loads(raw)
         if not vars_.get("delivery") or not vars_.get("retrieveDeliveryUrl") or not vars_.get("progress"):
             raise RuntimeError("RT delivery: vars de offload ausentes na resposta.")
+        pedido = _docguid(doc_url)
+        entregue = _docguid(vars_["delivery"])
+        if pedido and entregue and pedido != entregue:
+            raise RuntimeError(
+                f"RT delivery: docguid divergente (pedido {pedido} != entregue {entregue}) "
+                "— sessao serviu documento cruzado; abortado."
+            )
         s.evaluate(_fetch_text_js(vars_["delivery"]), await_promise=True)  # dispara geração
         deadline = time.time() + timeout
         ok = False
