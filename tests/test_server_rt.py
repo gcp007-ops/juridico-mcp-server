@@ -16,9 +16,21 @@ def test_rt_baixar_pdf_vazio():
     assert "invalido" in server.rt_baixar_pdf("").lower()
 
 
-def test_rt_baixar_pdf_sem_vault_e_sem_destino(monkeypatch):
-    """Sem THINKBOX_VAULT_PATH e sem destino → JSON erro mencionando THINKBOX_VAULT_PATH; baixar_documento nunca é chamado."""
-    monkeypatch.delenv("THINKBOX_VAULT_PATH", raising=False)
+def test_rt_baixar_pdf_usa_rt_download_dir(monkeypatch, tmp_path):
+    """RT_DOWNLOAD_DIR configurado e sem destino → usa env var, grava arquivo, retorna status ok."""
+    monkeypatch.setattr(server.rt_delivery, "baixar_documento",
+                        lambda doc, formato="PDF", **k: (b"%PDF-1.3 x", "j.pdf"))
+    monkeypatch.setenv("RT_DOWNLOAD_DIR", str(tmp_path))
+    out = _j.loads(server.rt_baixar_pdf("https://rt/doc?docguid=X"))
+    assert out["status"] == "ok"
+    assert out["filename"] == "j.pdf"
+    assert out["bytes"] == len(b"%PDF-1.3 x")
+    assert (tmp_path / "j.pdf").read_bytes().startswith(b"%PDF")
+
+
+def test_rt_baixar_pdf_sem_destino_nem_env(monkeypatch):
+    """Sem RT_DOWNLOAD_DIR e sem destino → JSON erro mencionando RT_DOWNLOAD_DIR; baixar_documento nunca é chamado."""
+    monkeypatch.delenv("RT_DOWNLOAD_DIR", raising=False)
 
     def _should_not_be_called(*a, **kw):
         raise AssertionError("baixar_documento foi chamado mas não deveria")
@@ -26,7 +38,7 @@ def test_rt_baixar_pdf_sem_vault_e_sem_destino(monkeypatch):
     monkeypatch.setattr(server.rt_delivery, "baixar_documento", _should_not_be_called)
     out = _j.loads(server.rt_baixar_pdf("https://rt/doc", destino=""))
     assert out["status"] == "erro"
-    assert "THINKBOX_VAULT_PATH" in out["mensagem"]
+    assert "RT_DOWNLOAD_DIR" in out["mensagem"]
 
 
 @pytest.mark.asyncio
