@@ -61,3 +61,19 @@ def test_rt_capturar_md_grava(monkeypatch, tmp_path):
 def test_listar_fontes_menciona_rt():
     txt = server.listar_fontes()
     assert "rt_jurisprudencia_buscar" in txt and "rt_capturar_md" in txt and "rt_baixar_pdf" in txt
+
+
+def test_rt_capturar_md_ok_sem_gravacao_quando_classe_ausente(monkeypatch, tmp_path):
+    """gravar=True mas classe vazia → status ok_sem_gravacao, markdown preservado."""
+    monkeypatch.setattr(server.rt_juris, "extrair_documento", lambda doc, **k: {
+        "url": doc, "tribunal": "STJ", "numero": "REsp 123456", "classe": "",  # ausente
+        "relator": "Min. Fulano", "data_julgamento": "1/1/2024", "data_publicacao": "",
+        "orgao_julgador": "Terceira Turma", "assunto": "Civil", "jrp": None,
+        "html_corpo": "<p>acórdão STJ aqui</p>"})
+    monkeypatch.setenv("THINKBOX_VAULT_PATH", str(tmp_path))
+    out = _j.loads(server.rt_capturar_md("https://rt/doc?docguid=STJ1", gravar=True))
+    assert out["status"] == "ok_sem_gravacao", f"status inesperado: {out}"
+    assert "markdown" in out, "markdown deve estar presente para não perder conteúdo"
+    assert "aviso" in out, "aviso deve explicar por que não gravou"
+    # garante que o markdown realmente contém conteúdo extraído
+    assert len(out["markdown"]) > 0

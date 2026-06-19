@@ -93,8 +93,8 @@ def parse_resultados(html_text: str) -> List[dict]:
 
 _HEADER_NUM = re.compile(r"([\d.\-/]{11,})")
 _HEADER_DATA = re.compile(r"j\.\s*(\d{1,2}/\d{1,2}/\d{4})")
-_HEADER_RELATOR = re.compile(r"julgado por\s+([^-]+?)\s*-")
-_HEADER_TURMA = re.compile(r"-\s*([^-]*?(?:Turma|Câmara)[^-]*?)\s*-")
+_HEADER_RELATOR = re.compile(r"(?:julgado por|Rel(?:ator)?(?:\(a\))?\.?|Min\.)\s*:?\s+([^-\n]+?)\s*-")
+_HEADER_TURMA = re.compile(r"-\s*([^-]*?(?:Turma|Câmara|Seção|Seções|Pleno|Corte Especial)[^-]*?)\s*-")
 _HEADER_DEJT = re.compile(r"(?:DEJT|DJe|DJ)\s+(\d{1,2}/\d{1,2}/\d{4})")
 _HEADER_AREA = re.compile(r"Área do Direito:\s*([^-\n]+)")
 _DOCCONTENT_JS = "(()=>{const e=document.querySelector('#docContent');return e?e.innerHTML:'__NO_DOC__';})()"
@@ -105,8 +105,9 @@ _TRIBUNAL_JS = (
 )
 
 
-def _meta_do_corpo(html_corpo: str) -> dict:
-    texto = _cap.html_para_md(_cap._limpar_corpo(html_corpo))
+def _meta_do_corpo(html_corpo_limpo: str) -> dict:
+    """Extrai metadados do corpo HTML já limpo (sem chamada interna a _limpar_corpo)."""
+    texto = _cap.html_para_md(html_corpo_limpo)
     primeira = next((l for l in texto.splitlines() if l.strip()), "")
     m_num = _HEADER_NUM.search(primeira)
     numero = m_num.group(1) if m_num else ""
@@ -145,7 +146,7 @@ def extrair_documento(doc_url: str, *, cdp_url=None, timeout: float = 45.0) -> d
     import urllib.parse as _u
     qs = _u.parse_qs(_u.urlparse(doc_url).query)
     corpo_limpo = _cap._limpar_corpo(corpo)
-    meta = _meta_do_corpo(corpo)
+    meta = _meta_do_corpo(corpo_limpo)
     return {
         "url": doc_url,
         "tribunal": tribunal,

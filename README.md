@@ -121,7 +121,7 @@ rt_jurisprudencia_buscar(
 )
 ```
 
-**Escopo atual:** jurisprudência (TRTs, TST, STJ, STF e outros tribunais). Legislação e súmulas serão adicionadas em versões futuras.
+**Escopo atual:** jurisprudência premium. Parser de cabeçalho validado para a Justiça do Trabalho (TRT/TST); para outras cortes (STJ, STF, TJs) a busca e o PDF funcionam, mas a extração de metadados do julgado (classe/relator/órgão) pode ficar parcial — nesse caso `rt_capturar_md` retorna o markdown com aviso (`ok_sem_gravacao`), sem gravar a nota. Legislação e súmulas serão adicionadas em versões futuras.
 
 ### `rt_baixar_pdf`
 

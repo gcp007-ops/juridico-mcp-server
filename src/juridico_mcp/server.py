@@ -311,7 +311,15 @@ async def rt_jurisprudencia_buscar(
 
 @mcp.tool()
 def rt_capturar_md(doc_url: str, gravar: bool = True) -> str:
-    """Captura um julgado RT como Markdown (a partir do HTML do documento)."""
+    """Captura um julgado RT como Markdown (a partir do HTML do documento).
+
+    Retorna JSON com status:
+    - "ok" + "path": gravado com sucesso na vault
+    - "ok_sem_gravacao" + "markdown" + "aviso": markdown extraído mas nota não
+      gravada (ex: metadados required ausentes para cortes não-TRT)
+    - "ok" + "markdown": gravar=False, markdown retornado sem gravar
+    - "erro" + "mensagem": falha de extração ou gravação inesperada
+    """
     import json as _json
     doc_url = (doc_url or "").strip()
     if not doc_url:
@@ -328,6 +336,13 @@ def rt_capturar_md(doc_url: str, gravar: bool = True) -> str:
     from .rt import vault as rt_vault
     try:
         path = rt_vault.escrever_julgado(doc, corpo_md)
+    except ValueError as e:
+        # Campo required ausente (ex: classe vazia em corte não-TRT) — devolve
+        # o markdown já extraído + aviso claro; conteúdo NÃO é descartado.
+        return _json.dumps(
+            {"status": "ok_sem_gravacao", "markdown": corpo_md, "aviso": str(e)},
+            ensure_ascii=False,
+        )
     except Exception as e:
         return _json.dumps({"status": "erro", "mensagem": f"falha ao gravar nota: {e}"}, ensure_ascii=False)
     return _json.dumps({"status": "ok", "path": path}, ensure_ascii=False)
@@ -384,7 +399,7 @@ def listar_fontes() -> str:
 
 5. RT Online — server-only via Chrome dedicado/CDP (requer RT_CDP_URL)
    rt_jurisprudencia_buscar(livre/numero/relator/tribunais/ano/data_de/data_ate)
-     Busca jurisprudencia premium RT: TRTs, TST, STJ, STF e outros tribunais
+     Busca jurisprudencia premium RT (cabeçalho validado para TRT/TST; metadados parciais em STJ/STF)
    rt_baixar_pdf(doc_url)
      Baixa o PDF do julgado; grava em THINKBOX_VAULT_PATH se definido
    rt_capturar_md(doc_url, gravar)
