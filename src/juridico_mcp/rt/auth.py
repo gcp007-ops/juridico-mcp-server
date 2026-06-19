@@ -19,7 +19,7 @@ import time
 import urllib.parse
 from typing import Literal, Optional
 
-from .cdp_session import RtCdpSession, DEFAULT_TIMEOUT
+from .cdp_session import RtCdpSession
 
 __all__ = ["RtInteractiveLoginRequired", "login_rt_via_cdp"]
 
@@ -51,30 +51,38 @@ def _auth0_page(url: str) -> Optional[Literal["identifier", "password"]]:
     return None
 
 
-def _auth0_fill_identifier_js(email: str) -> str:
+def _auth0_fill_field_js(selectors_js: str, value: str, not_found: str) -> str:
+    """Builds a self-invoking JS snippet that fills one Auth0 input field and submits.
+
+    Args:
+        selectors_js: JS expression that evaluates to the field element (or null).
+        value: value to set on the field.
+        not_found: return string when the field is not found.
+    """
     return (
         "(function(){const find=(s)=>document.querySelector(s);"
-        "const u=find('#username')||find('input[name=\"username\"]')||find('input[type=\"email\"]');"
-        "if(!u) return 'username_not_found';"
-        f"u.value={json.dumps(email)};"
-        "u.dispatchEvent(new Event('input',{bubbles:true}));"
-        "u.dispatchEvent(new Event('change',{bubbles:true}));"
+        f"const f={selectors_js};"
+        f"if(!f) return {json.dumps(not_found)};"
+        f"f.value={json.dumps(value)};"
+        "f.dispatchEvent(new Event('input',{bubbles:true}));"
+        "f.dispatchEvent(new Event('change',{bubbles:true}));"
         "const b=find('button[type=\"submit\"][name=\"action\"]')||find('button[type=\"submit\"]');"
         "if(!b) return 'btn_not_found'; b.click(); return 'submitted';})()"
     )
+
+
+def _auth0_fill_identifier_js(email: str) -> str:
+    selectors = (
+        "find('#username')||find('input[name=\"username\"]')||find('input[type=\"email\"]')"
+    )
+    return _auth0_fill_field_js(selectors, email, "username_not_found")
 
 
 def _auth0_fill_password_js(password: str) -> str:
-    return (
-        "(function(){const find=(s)=>document.querySelector(s);"
-        "const p=find('#password')||find('input[name=\"password\"]')||find('input[type=\"password\"]');"
-        "if(!p) return 'password_not_found';"
-        f"p.value={json.dumps(password)};"
-        "p.dispatchEvent(new Event('input',{bubbles:true}));"
-        "p.dispatchEvent(new Event('change',{bubbles:true}));"
-        "const b=find('button[type=\"submit\"][name=\"action\"]')||find('button[type=\"submit\"]');"
-        "if(!b) return 'btn_not_found'; b.click(); return 'submitted';})()"
+    selectors = (
+        "find('#password')||find('input[name=\"password\"]')||find('input[type=\"password\"]')"
     )
+    return _auth0_fill_field_js(selectors, password, "password_not_found")
 
 
 def _signon_enter_email_js(email: str) -> str:
@@ -123,7 +131,7 @@ def _rt_credentials() -> tuple[str, str]:
 
 
 def login_rt_via_cdp(cdp_url: str, email: Optional[str] = None,
-                     senha: Optional[str] = None, timeout: float = DEFAULT_TIMEOUT,
+                     senha: Optional[str] = None, timeout: float = 60.0,
                      poll_interval: float = 1.0) -> dict:
     """Garante sessao RT autenticada no Chrome dedicado.
 
