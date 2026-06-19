@@ -17,7 +17,7 @@ def slug_ascii(texto: str, max_len: int = 60) -> str:
 
 
 def _esc(v: str) -> str:
-    return str(v).replace('"', '\\"')
+    return str(v).replace("\\", "\\\\").replace('"', '\\"')
 
 
 def montar_frontmatter(meta: dict, pdf_local: str = "") -> str:

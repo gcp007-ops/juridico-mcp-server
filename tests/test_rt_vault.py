@@ -17,6 +17,17 @@ def test_montar_frontmatter_julgado_required_e_escape():
     assert 'fonte: "RT Online"' in fm
 
 
+def test_codigo_backslash_valido_yaml():
+    # PyYAML indisponível: verifica estruturalmente que backslashes são dobrados no texto do frontmatter
+    # Sem o fix, _esc não escaparia '\', emitindo codigo: "JRP\2024\1935245" (YAML inválido).
+    fm = vault.montar_frontmatter({
+        "tribunal": "TRT-3", "classe": "RO", "numero": "0001",
+        "jrp": "JRP\\2024\\1935245",
+    })
+    # No arquivo gerado, cada '\' deve aparecer como '\\' dentro das aspas duplas do YAML
+    assert 'codigo: "JRP\\\\2024\\\\1935245"' in fm
+
+
 def test_escrever_julgado_required_ausente_levanta(tmp_path):
     with pytest.raises(ValueError):
         vault.escrever_julgado({"tribunal": "", "classe": "", "numero": ""}, "corpo", base_path=str(tmp_path))
