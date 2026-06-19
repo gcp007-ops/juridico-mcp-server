@@ -141,6 +141,7 @@ def login_rt_via_cdp(cdp_url: str, email: Optional[str] = None,
 
     submitted: set[str] = set()
     deadline = time.time() + timeout
+    url = ""
 
     with RtCdpSession(cdp_url, timeout=timeout) as s:
         s.navigate(RT_ENTRY)

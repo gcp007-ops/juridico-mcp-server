@@ -151,7 +151,6 @@ def extrair_documento(doc_url: str, *, cdp_url=None, timeout: float = 45.0) -> d
         "tribunal": tribunal,
         "jrp": (qs.get("jrp") or [None])[0],
         "html_corpo": corpo_limpo,
-        "data_publicacao": "",
         **meta,
     }
 

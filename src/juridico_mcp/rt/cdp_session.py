@@ -65,7 +65,10 @@ class RtCdpSession:
     def __exit__(self, *exc):
         try:
             if self._ws:
-                self._ws.close()
+                try:
+                    self._ws.close()
+                except Exception:
+                    pass
         finally:
             if self._tid:
                 _cdp.close_target(self._host, self._port, self._tid)
