@@ -320,10 +320,17 @@ def rt_capturar_md(doc_url: str, gravar: bool = True) -> str:
         doc = rt_juris.extrair_documento(doc_url)
         from .rt import captura_md as _cap
         corpo_md = _cap.html_para_md(doc["html_corpo"])
-        markdown = corpo_md  # montagem final/gravação entram na Task 6
+        markdown = corpo_md
     except Exception as e:
         return _json.dumps({"status": "erro", "mensagem": str(e)}, ensure_ascii=False)
-    return _json.dumps({"status": "ok", "markdown": markdown}, ensure_ascii=False)
+    if not gravar:
+        return _json.dumps({"status": "ok", "markdown": markdown}, ensure_ascii=False)
+    from .rt import vault as rt_vault
+    try:
+        path = rt_vault.escrever_julgado(doc, corpo_md)
+    except Exception as e:
+        return _json.dumps({"status": "erro", "mensagem": f"falha ao gravar nota: {e}"}, ensure_ascii=False)
+    return _json.dumps({"status": "ok", "path": path}, ensure_ascii=False)
 
 
 @mcp.tool()

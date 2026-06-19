@@ -42,3 +42,17 @@ def test_rt_capturar_md_retorna_markdown(monkeypatch):
         "html_corpo": "<div id='docContent'><p>acórdão <b>x</b></p></div>"})
     out = _j.loads(server.rt_capturar_md("https://rt/doc?docguid=X", gravar=False))
     assert "**x**" in out["markdown"]
+
+
+def test_rt_capturar_md_grava(monkeypatch, tmp_path):
+    monkeypatch.setattr(server.rt_juris, "extrair_documento", lambda doc, **k: {
+        "url": doc, "tribunal": "TRT-3", "numero": "0010198-10.2024.5.03.0079", "classe": "RO",
+        "relator": "Morais", "data_julgamento": "8/10/2024", "data_publicacao": "",
+        "orgao_julgador": "6.ª Turma", "assunto": "Trabalho", "jrp": "JRP\\2024\\1",
+        "html_corpo": "<div id='docContent'><p>acórdão</p></div>"})
+    monkeypatch.setenv("THINKBOX_VAULT_PATH", str(tmp_path))
+    import json as _j
+    out = _j.loads(server.rt_capturar_md("https://rt/doc?docguid=X", gravar=True))
+    assert out["status"] == "ok" and out["path"].endswith(".md")
+    import pathlib
+    assert pathlib.Path(out["path"]).read_text(encoding="utf-8").startswith("---\n")

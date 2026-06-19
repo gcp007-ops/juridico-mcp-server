@@ -94,7 +94,8 @@ def parse_resultados(html_text: str) -> List[dict]:
 _HEADER_NUM = re.compile(r"([\d.\-/]{11,})")
 _HEADER_DATA = re.compile(r"j\.\s*(\d{1,2}/\d{1,2}/\d{4})")
 _HEADER_RELATOR = re.compile(r"julgado por\s+([^-]+?)\s*-")
-_HEADER_TURMA = re.compile(r"-\s*([^-]*?Turma)\s*-")
+_HEADER_TURMA = re.compile(r"-\s*([^-]*?(?:Turma|Câmara)[^-]*?)\s*-")
+_HEADER_DEJT = re.compile(r"(?:DEJT|DJe|DJ)\s+(\d{1,2}/\d{1,2}/\d{4})")
 _HEADER_AREA = re.compile(r"Área do Direito:\s*([^-\n]+)")
 _DOCCONTENT_JS = "(()=>{const e=document.querySelector('#docContent');return e?e.innerHTML:'__NO_DOC__';})()"
 _TRIBUNAL_JS = "(()=>{const h=document.querySelector('h1.hTitle');return h?h.textContent.trim():'';})()"
@@ -116,11 +117,13 @@ def _meta_do_corpo(html_corpo: str) -> dict:
     m_rel = _HEADER_RELATOR.search(primeira)
     m_turma = _HEADER_TURMA.search(primeira)
     m_area = _HEADER_AREA.search(primeira)
+    m_dejt = _HEADER_DEJT.search(primeira)
     return {
         "numero": numero,
         "classe": classe,
         "relator": m_rel.group(1).strip() if m_rel else "",
         "data_julgamento": m_data.group(1) if m_data else "",
+        "data_publicacao": m_dejt.group(1) if m_dejt else "",
         "orgao_julgador": m_turma.group(1).strip() if m_turma else "",
         "assunto": m_area.group(1).strip() if m_area else "",
     }
