@@ -17,11 +17,13 @@ from .cdp_session import RtCdpSession, cdp_url_or_raise
 _FMT = {"PDF": "PDF", "RTF": "RTF"}
 _FILENAME_RE = re.compile(r'filename\s*=\s*"?([^";]+)"?', re.I)
 
+_COMPLETE_RE = re.compile(r"<complete>\s*true\s*</complete>", re.I)
+_SUCCESS_RE = re.compile(r"<successful>\s*true\s*</successful>", re.I)
+
 
 def _parse_status_xml(xml: str) -> Tuple[bool, bool]:
-    complete = "<complete>true</complete>" in (xml or "")
-    successful = "<successful>true</successful>" in (xml or "")
-    return complete, successful
+    x = xml or ""
+    return (bool(_COMPLETE_RE.search(x)), bool(_SUCCESS_RE.search(x)))
 
 
 def _click_save_js() -> str:
@@ -50,6 +52,8 @@ def _fetch_text_js(url: str) -> str:
 
 
 def _fetch_bin_js(url: str) -> str:
+    # NOTE: transfers the PDF byte-by-byte via btoa over CDP; hits the CDP
+    # message-size ceiling (~100 MB) for very large documents — known limitation.
     return (
         f"(async()=>{{const r=await fetch({json.dumps(url)},{{credentials:'include'}});"
         "const cd=r.headers.get('content-disposition')||'';"
@@ -95,7 +99,7 @@ def baixar_documento(doc_url: str, formato: str = "PDF", *,
         if raw in ("__NO_OPTFORM__", None):
             raise RuntimeError("RT delivery: formulário de opções ausente após Salvar.")
         vars_ = json.loads(raw)
-        if not vars_.get("delivery") or not vars_.get("retrieveDeliveryUrl"):
+        if not vars_.get("delivery") or not vars_.get("retrieveDeliveryUrl") or not vars_.get("progress"):
             raise RuntimeError("RT delivery: vars de offload ausentes na resposta.")
         s.evaluate(_fetch_text_js(vars_["delivery"]), await_promise=True)  # dispara geração
         deadline = time.time() + timeout
@@ -109,7 +113,10 @@ def baixar_documento(doc_url: str, formato: str = "PDF", *,
             time.sleep(1.0)
         if not ok:
             raise RuntimeError("RT delivery: geração não concluiu com sucesso (assinatura/limite?).")
-        meta = json.loads(s.evaluate(_fetch_bin_js(vars_["retrieveDeliveryUrl"]), await_promise=True))
+        _bin_raw = s.evaluate(_fetch_bin_js(vars_["retrieveDeliveryUrl"]), await_promise=True)
+        if not _bin_raw:
+            raise RuntimeError("RT delivery: download nao retornou dados (documento grande ou sessao expirada)")
+        meta = json.loads(_bin_raw)
     data = base64.b64decode(meta["b64"]) if meta.get("b64") else b""
     if not data:
         raise RuntimeError("RT delivery: binário vazio retornado.")

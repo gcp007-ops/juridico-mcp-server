@@ -355,11 +355,17 @@ def rt_baixar_pdf(doc_url: str, destino: str = "") -> str:
     doc_url = (doc_url or "").strip()
     if not doc_url:
         return "Parametro invalido: doc_url obrigatoria."
+    destino = (destino or "").strip()
+    if not destino and not _os.environ.get("THINKBOX_VAULT_PATH", "").strip():
+        return _json.dumps(
+            {"status": "erro", "mensagem": "THINKBOX_VAULT_PATH nao configurado: passe destino ou configure a vault"},
+            ensure_ascii=False,
+        )
     try:
         data, filename = rt_delivery.baixar_documento(doc_url, "PDF")
     except Exception as e:
         return _json.dumps({"status": "erro", "mensagem": str(e)}, ensure_ascii=False)
-    pasta = destino.strip() or _os.path.join(
+    pasta = destino or _os.path.join(
         _os.environ.get("THINKBOX_VAULT_PATH", ""), "Conhecimento", "Fontes", "Julgados", "RT", "_pdf")
     _os.makedirs(pasta, exist_ok=True)
     path = _os.path.join(pasta, filename)

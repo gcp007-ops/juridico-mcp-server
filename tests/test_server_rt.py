@@ -16,6 +16,19 @@ def test_rt_baixar_pdf_vazio():
     assert "invalido" in server.rt_baixar_pdf("").lower()
 
 
+def test_rt_baixar_pdf_sem_vault_e_sem_destino(monkeypatch):
+    """Sem THINKBOX_VAULT_PATH e sem destino → JSON erro mencionando THINKBOX_VAULT_PATH; baixar_documento nunca é chamado."""
+    monkeypatch.delenv("THINKBOX_VAULT_PATH", raising=False)
+
+    def _should_not_be_called(*a, **kw):
+        raise AssertionError("baixar_documento foi chamado mas não deveria")
+
+    monkeypatch.setattr(server.rt_delivery, "baixar_documento", _should_not_be_called)
+    out = _j.loads(server.rt_baixar_pdf("https://rt/doc", destino=""))
+    assert out["status"] == "erro"
+    assert "THINKBOX_VAULT_PATH" in out["mensagem"]
+
+
 @pytest.mark.asyncio
 async def test_rt_jurisprudencia_buscar_formata(monkeypatch):
     async def fake_buscar(**kw):

@@ -7,6 +7,10 @@ def test_parse_status_xml():
     assert delivery._parse_status_xml("<response><complete>false</complete></response>") == (False, False)
 
 
+def test_parse_status_xml_whitespace_and_case():
+    assert delivery._parse_status_xml("<complete> TRUE </complete><successful>true</successful>") == (True, True)
+
+
 def test_normalizar_filename():
     assert delivery._normalizar_filename("RTDoc x.pdf.pdf", "PDF") == "RTDoc x.pdf"
     assert delivery._normalizar_filename("doc", "PDF") == "doc.pdf"
