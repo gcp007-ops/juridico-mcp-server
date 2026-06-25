@@ -93,25 +93,38 @@ class CdpSession:
                 _cdp.close_target(self._host, self._port, self._tid)
 
     def _cmd(self, method: str, params: dict | None = None) -> dict:
-        """Envia comando CDP e retorna a resposta completa."""
+        """Envia comando CDP e retorna a resposta completa.
+
+        Passa recv_timeout=self.timeout para que uma pagina "tagarela" (flood de
+        eventos) nao bloqueie o recv da resposta indefinidamente. Levanta CdpError
+        em erro de protocolo (antes era engolido e virava None silencioso).
+        """
         self._seq += 1
-        return _cdp.cdp_call(self._ws, method, params or {}, self._seq)
+        resp = _cdp.cdp_call(self._ws, method, params or {}, self._seq, self.timeout)
+        if isinstance(resp, dict) and "error" in resp:
+            raise _cdp.CdpError(f"CDP error em {method}: {resp['error']}")
+        return resp
 
     def evaluate(self, expr: str, await_promise: bool = False):
         """Avalia JS na pagina e retorna o valor desembrulhado.
 
         Se await_promise=True, usa cdp_eval (que ja fixa awaitPromise=True em cdp-scaffold).
         Se await_promise=False, usa Runtime.evaluate direto via _cmd.
+
+        Em ambos os modos, um erro de JS (exception/subtype=="error") levanta
+        CdpError em vez de devolver None silencioso — alinhado a cdp_eval.
         """
         if await_promise:
             self._seq += 1
             return _cdp.cdp_eval(self._ws, expr, self._seq)
-        else:
-            r = self._cmd(
-                "Runtime.evaluate",
-                {"expression": expr, "returnByValue": True, "awaitPromise": False},
-            )
-            return r.get("result", {}).get("result", {}).get("value")
+        r = self._cmd(
+            "Runtime.evaluate",
+            {"expression": expr, "returnByValue": True, "awaitPromise": False},
+        )
+        result = r.get("result", {}).get("result", {})
+        if result.get("subtype") == "error":
+            raise _cdp.CdpError(f"JS error: {result.get('description')}")
+        return result.get("value")
 
     def navigate(self, url: str) -> None:
         self._cmd("Page.navigate", {"url": url})

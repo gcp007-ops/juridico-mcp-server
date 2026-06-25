@@ -4,20 +4,11 @@
 Grava nota schema-conforme (noteType julgado, required tribunal/classe/numero) com
 frontmatter YAML válido (escalares escapados). Não invoca skills."""
 from __future__ import annotations
-import os, re, unicodedata
+from ..vault_common import esc_yaml as _esc, exigir_required, escrever_nota, slug_ascii
 
 SUBPASTA = ("Conhecimento", "Fontes", "Julgados", "RT")
 _REQUIRED = ("tribunal", "classe", "numero")
-
-
-def slug_ascii(texto: str, max_len: int = 60) -> str:
-    sem = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode()
-    sem = re.sub(r"[^a-zA-Z0-9]+", "-", sem).strip("-").lower()
-    return (sem[:max_len].rstrip("-")) or "julgado"
-
-
-def _esc(v: str) -> str:
-    return str(v).replace("\\", "\\\\").replace('"', '\\"')
+# slug_ascii: RT usa o default (max_len=60, lower=True) de vault_common.
 
 
 def montar_frontmatter(meta: dict, pdf_local: str = "") -> str:
@@ -35,19 +26,6 @@ def montar_frontmatter(meta: dict, pdf_local: str = "") -> str:
 
 
 def escrever_julgado(meta: dict, corpo_md: str, *, base_path=None, pdf_local: str = "") -> str:
-    faltando = [c for c in _REQUIRED if not meta.get(c)]
-    if faltando:
-        raise ValueError(f"julgado: campos required ausentes: {', '.join(faltando)}")
-    base = base_path or os.environ.get("THINKBOX_VAULT_PATH", "")
-    if not base or not base.strip():
-        raise ValueError(
-            "THINKBOX_VAULT_PATH nao configurado: defina o caminho da vault (server-side) ou passe base_path"
-        )
-    pasta = os.path.join(base, *SUBPASTA)
-    os.makedirs(pasta, exist_ok=True)
-    nome = slug_ascii(meta["numero"])
-    path = os.path.join(pasta, f"{nome}.md")
+    exigir_required(meta, _REQUIRED)
     conteudo = montar_frontmatter(meta, pdf_local=pdf_local) + corpo_md.strip() + "\n"
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(conteudo)
-    return path
+    return escrever_nota(SUBPASTA, slug_ascii(meta["numero"]), conteudo, base_path=base_path)

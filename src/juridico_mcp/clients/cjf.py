@@ -11,7 +11,7 @@ import httpx
 from urllib.parse import urlencode
 from tenacity import retry, wait_exponential, stop_after_attempt
 from typing import List, Optional
-from ..shared import ResultadoJuridico, limpar_html
+from ..shared import ResultadoJuridico
 
 CJF_URL = "https://jurisprudencia.cjf.jus.br/unificada/index.xhtml"
 
@@ -118,10 +118,20 @@ class CJFClient:
         )
         resp.raise_for_status()
 
-        # Atualizar ViewState da resposta
-        match = re.search(r'ViewState[^>]*>([^<]+)<', resp.text)
+        # Atualizar ViewState da resposta. A resposta partial-ajax do JSF devolve
+        # o novo ViewState como <update id="...ViewState..."><![CDATA[novo]]></update>;
+        # a regex antiga (ViewState[^>]*>([^<]+)<) NAO casava o CDATA, deixando o
+        # client (singleton) com ViewState velho -> ViewExpired na 2a busca.
+        match = re.search(
+            r'<update\s+id="[^"]*ViewState[^"]*">\s*<!\[CDATA\[(.*?)\]\]>',
+            resp.text, re.DOTALL,
+        )
+        if not match:  # fallback: pagina cheia (name=... value=...)
+            match = re.search(
+                r'name="javax\.faces\.ViewState"[^>]*value="([^"]+)"', resp.text
+            )
         if match:
-            self._viewstate = match.group(1)
+            self._viewstate = match.group(1).strip()
 
         return self._parse_resultados(resp.text, max_resultados)
 

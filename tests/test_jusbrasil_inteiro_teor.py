@@ -176,3 +176,42 @@ def test_extrair_inteiro_teor_monta_payload(monkeypatch):
     assert out["url_inteiro_teor"].endswith("/inteiro-teor-1373238664")
     assert out["inteiro_teor"].startswith("EMENTA: APELAÇÃO CÍVEL")
     assert out["ementa"].startswith("APELAÇÃO CÍVEL - USUCAPIÃO")
+
+
+def test_extrair_inteiro_teor_nunca_navega_nao_retorna_stale(monkeypatch):
+    """Se a aba NUNCA navega para /inteiro-teor-, o teor deve sair vazio — nunca o
+    conteudo stale grande da aba anterior (bug do poll antigo)."""
+
+    class FakeSession:
+        def __init__(self, url, timeout=None):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def navigate(self, url):
+            pass
+
+        def wait_ready(self, extra=1.5):
+            return True
+
+        def evaluate(self, js, await_promise=False):
+            if "lawsuitLabel" in js:
+                return {"lawsuitLabel": LAWSUIT, "topText": TOP_TEXT}
+            if ".click()" in js:
+                return "__NO_TAB__"  # aba nao encontrada/clique sem efeito
+            # AFTER: URL nunca vira /inteiro-teor-; texto stale grande
+            return {"url": "https://x/jurisprudencia/tj-mg/123", "text": "S" * 9000}
+
+    monkeypatch.setattr(it, "JusbrasilCdpSession", FakeSession)
+    monkeypatch.setattr(it, "_throttle", lambda: None)
+    monkeypatch.setattr(it.time, "sleep", lambda *_: None)
+    monkeypatch.delenv("JUSBRASIL_CDP_URL", raising=False)
+
+    out = it.extrair_inteiro_teor("https://x/jurisprudencia/tj-mg/123")
+    assert out["inteiro_teor"] == ""      # nao retornou o stale de 9000 chars
+    assert out["url_inteiro_teor"] == ""  # nunca navegou
+    assert out["citavel"] is False

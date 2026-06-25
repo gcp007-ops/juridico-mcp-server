@@ -36,6 +36,11 @@ _PROCESSO_PREFIXO = re.compile(r"^\s*Processo\s+")
 # Abas/labels de navegacao que prefixam o texto do container de inteiro teor.
 _TAB_LABELS = {"resumo", "inteiro teor", "fatos", "documentos", "jurisprudência semelhante"}
 
+# Piso para aceitar o texto da aba como "conteudo real" e nao um placeholder/0
+# transitorio do rerender SPA. Abaixo disso so encerra por timeout (julgado curto).
+_MIN_TEOR_LEN = 800
+_MAX_POLLS = 20
+
 # Metadados: numero (lawsuitLabel) + bloco de cabecalho (texto do topo do main).
 META_JS = r"""
 (() => {
@@ -148,21 +153,26 @@ def extrair_inteiro_teor(doc_url: str, *, cdp_url: Optional[str] = None,
         # senao capturamos o conteudo stale da aba anterior ou o 0 transitorio.
         after = {}
         last_len = -1
-        for _ in range(20):
+        navegou = False
+        for _ in range(_MAX_POLLS):
             time.sleep(0.4)
             a = s.evaluate(AFTER_JS)
             if not isinstance(a, dict):
                 continue
-            after = a
             ln = len(a.get("text", "") or "")
             url_now = a.get("url", "") or ""
-            if "inteiro-teor" in url_now and ln > 2000 and ln == last_len:
-                break
+            if "inteiro-teor" in url_now:
+                navegou = True
+                after = a  # so aceita o texto APOS a navegacao (descarta o stale pre-clique)
+                if ln >= _MIN_TEOR_LEN and ln == last_len:  # estabilizou com conteudo real
+                    break
             last_len = ln
     if not isinstance(meta_raw, dict):
         meta_raw = {}
     meta = _parse_metadata(meta_raw.get("lawsuitLabel", ""), meta_raw.get("topText", ""))
-    teor = _limpar_inteiro_teor(after.get("text", "") if isinstance(after, dict) else "")
+    # So confia no texto se a aba realmente navegou para /inteiro-teor- (senao seria
+    # o conteudo stale da aba anterior); navegou=False => teor vazio, nunca stale.
+    teor = _limpar_inteiro_teor(after.get("text", "")) if navegou else ""
     return {
         "fonte": "jusbrasil",
         "url_origem": doc_url,

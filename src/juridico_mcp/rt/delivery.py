@@ -13,6 +13,7 @@ import time
 from typing import Optional, Tuple
 
 from .cdp_session import RtCdpSession, cdp_url_or_raise
+from ..cdp_common import CdpSessionExpired
 
 _FMT = {"PDF": "PDF", "RTF": "RTF"}
 _FILENAME_RE = re.compile(r'filename\s*=\s*"?([^";]+)"?', re.I)
@@ -130,6 +131,13 @@ def baixar_documento(doc_url: str, formato: str = "PDF", *,
         if not _bin_raw:
             raise RuntimeError("RT delivery: download nao retornou dados (documento grande ou sessao expirada)")
         meta = json.loads(_bin_raw)
+    # Guard de content-type: uma sessao morta serve a pagina de login (text/html)
+    # na URL de retrieval; sem isto o HTML seria base64-decodado e salvo como .pdf.
+    ct = (meta.get("ct") or "").lower()
+    if "html" in ct:
+        raise CdpSessionExpired(
+            "RT delivery: retrieval retornou HTML (sessao provavelmente expirada)."
+        )
     data = base64.b64decode(meta["b64"]) if meta.get("b64") else b""
     if not data:
         raise RuntimeError("RT delivery: binário vazio retornado.")
