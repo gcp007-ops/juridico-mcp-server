@@ -1,57 +1,83 @@
 """
 Client: STJ SCON (Sistema de Consulta de Jurisprudencia)
 Fonte: https://scon.stj.jus.br/SCON/
-Tecnica: Browser automation via nodriver (Cloudflare protege o site)
-Dados: Acordaos, decisoes monocraticas, inteiro teor
+Tecnica: aba de fundo no Chrome dedicado via CDP (server-only). O SCON esta atras
+de Cloudflare managed challenge; o navegador real (logado, :9222) resolve o
+challenge sozinho em ~poucos segundos — por isso NAO abrimos uma janela nodriver
+(o pop atrapalhava o trabalho na maquina). Mesma plumbing de RT/Jusbrasil.
+Dados: Acordaos, decisoes monocraticas.
 
-Referencia: pacote R jjesusfilho/stj (estrategia de 2 passos AJAX+toc.jsp).
-O STJ esta atras de Cloudflare managed challenge, entao usamos nodriver
-para resolver o challenge e submeter o formulario via browser real.
+Referencia: pacote R jjesusfilho/stj (estrategia AJAX+toc.jsp).
 """
 
+import json
 import re
+import time
 import unicodedata
-import asyncio
 from bs4 import BeautifulSoup
 from typing import List, Optional
+
 from ..shared import ResultadoJuridico, limpar_html
+from ..cdp_common import CdpSession, cdp_url_or_raise, DEFAULT_TIMEOUT
 
 STJ_BASE = "https://scon.stj.jus.br/SCON"
+STJ_CDP_ENV = "STJ_CDP_URL"
+STJ_CDP_DEFAULT = "http://127.0.0.1:9222"  # mesmo Chrome dedicado de RT/Jusbrasil
 
 # Timeouts de POLLING (segundos): aguarda a condicao em vez de sleep fixo.
-# Sleeps fixos curtos capturavam a pagina ainda em branco -> "0 resultados".
-_CF_WAIT = 15      # ate o form de busca aparecer (Cloudflare/JS)
+_CF_WAIT = 20      # ate o form aparecer (Cloudflare auto-resolve em ~6s no browser real)
 _RESULT_WAIT = 20  # ate os resultados (div.documento) carregarem
 
+_FORM_PRONTO_JS = (
+    "!!document.getElementById('frmConsulta') "
+    "&& !!document.querySelector('input[name=\"livre\"]')"
+)
+_RESULTADO_PRONTO_JS = (
+    "document.querySelectorAll('div.documento').length > 0 "
+    "|| /n[ãa]o encontrou|nenhum documento|0 documento/i.test("
+    "document.body ? document.body.innerText : '')"
+)
+_OUTER_HTML_JS = "document.documentElement.outerHTML"
 
-async def _poll(page, expr_js: str, timeout: float, intervalo: float = 0.5):
-    """Polla expr_js ate retornar truthy ou estourar o timeout; devolve o ultimo valor.
 
-    Robustez sobre sleep fixo: encerra assim que a condicao e satisfeita (rapido
-    quando pronto) e tem teto previsivel quando nao ha resultado."""
+def _poll(session, expr_js: str, timeout: float, intervalo: float = 0.5):
+    """Polla expr_js (via session.evaluate) ate truthy ou timeout; devolve o ultimo
+    valor. Encerra assim que a condicao e satisfeita (rapido quando pronto) e tem
+    teto previsivel quando nao ha resultado — robustez sobre sleep fixo."""
     ultimo = None
-    import asyncio as _asyncio
     for _ in range(max(1, int(timeout / intervalo))):
         try:
-            ultimo = await page.evaluate(expr_js)
+            ultimo = session.evaluate(expr_js)
         except Exception:
             ultimo = None
         if ultimo:
             return ultimo
-        await _asyncio.sleep(intervalo)
+        time.sleep(intervalo)
     return ultimo
 
 
 def _normalizar_busca(texto: str) -> str:
     """Normaliza termo de busca: MAIUSCULO e sem acentos (padrao do STJ/SCON)."""
-    # Remover acentos
     nfkd = unicodedata.normalize("NFKD", texto)
     sem_acento = "".join(c for c in nfkd if not unicodedata.combining(c))
     return sem_acento.upper()
 
 
+def _submit_js(livre: str, b: str, data_inicial: str, data_final: str) -> str:
+    """JS que preenche o frmConsulta (livre/base/datas) e submete. Valores via
+    json.dumps (escape seguro)."""
+    return f"""(function(){{
+      var f=document.getElementById('frmConsulta');
+      var L=f.querySelector('input[name="livre"]'); if(L) L.value={json.dumps(livre)};
+      var B=f.querySelector('[name="b"]'); if(B) B.value={json.dumps(b)};
+      var d1=f.querySelector('input[name="dtpb1"]'); if(d1) d1.value={json.dumps(data_inicial)};
+      var d2=f.querySelector('input[name="dtpb2"]'); if(d2) d2.value={json.dumps(data_final)};
+      f.submit();
+    }})()"""
+
+
 class STJClient:
-    """Client para STJ SCON jurisprudencia via browser."""
+    """Client para STJ SCON jurisprudencia via aba de fundo CDP (sem janela)."""
 
     def buscar(
         self,
@@ -61,13 +87,35 @@ class STJClient:
         data_final: str = "",
         max_resultados: int = 10,
     ) -> List[ResultadoJuridico]:
+        """Busca jurisprudencia no STJ SCON via aba de fundo no Chrome dedicado.
+
+        Args:
+            busca: Termo de busca livre.
+            base: ACOR (acordaos) ou MONO (monocraticas).
+            data_inicial/data_final: DD/MM/AAAA (filtro por data de julgamento).
+            max_resultados: Limite de resultados.
         """
-        Busca jurisprudencia no STJ SCON (sync wrapper).
-        Use buscar_async() quando ja estiver dentro de um event loop.
-        """
-        return asyncio.run(
-            self.buscar_async(busca, base, data_inicial, data_final, max_resultados)
-        )
+        base_upper = base.upper()
+        b_param = "DTXT" if base_upper == "MONO" else base_upper
+        busca_norm = _normalizar_busca(busca)
+        cdp_url = cdp_url_or_raise(env_var=STJ_CDP_ENV, default=STJ_CDP_DEFAULT, fonte="STJ")
+
+        with CdpSession(cdp_url, timeout=DEFAULT_TIMEOUT) as s:
+            s.navigate(f"{STJ_BASE}/")
+            # Polla o form (Cloudflare auto-resolve no browser real) em vez de sleep fixo.
+            if not _poll(s, _FORM_PRONTO_JS, _CF_WAIT):
+                raise RuntimeError(
+                    "STJ SCON: formulario de busca nao carregou "
+                    "(Cloudflare/sessao/timeout no Chrome dedicado)."
+                )
+            s.evaluate(_submit_js(busca_norm, b_param, data_inicial, data_final))
+            # Polla os resultados; encerra cedo se a pagina sinalizar busca vazia.
+            _poll(s, _RESULTADO_PRONTO_JS, _RESULT_WAIT)
+            html_text = s.evaluate(_OUTER_HTML_JS)
+
+        if not isinstance(html_text, str):
+            return []
+        return self._parse_resultados(html_text, base_upper, max_resultados)
 
     async def buscar_async(
         self,
@@ -77,97 +125,12 @@ class STJClient:
         data_final: str = "",
         max_resultados: int = 10,
     ) -> List[ResultadoJuridico]:
-        """
-        Busca jurisprudencia no STJ SCON (async, para uso dentro de event loop).
-
-        Args:
-            busca: Termo de busca livre
-            base: ACOR (acordaos) ou MONO (monocraticas)
-            data_inicial: Formato DD/MM/AAAA
-            data_final: Formato DD/MM/AAAA
-            max_resultados: Limite de resultados
-        """
-        return await self._buscar_async(busca, base, data_inicial, data_final, max_resultados)
-
-    async def _buscar_async(
-        self,
-        busca: str,
-        base: str,
-        data_inicial: str,
-        data_final: str,
-        max_resultados: int,
-    ) -> List[ResultadoJuridico]:
-        """Busca via browser para bypass de Cloudflare."""
-        import nodriver as uc
-
-        base_upper = base.upper()
-        b_param = "DTXT" if base_upper == "MONO" else base_upper
-
-        # Normalizar busca: MAIUSCULO sem acentos (padrao SCON, ref: pacote R)
-        busca_normalizada = _normalizar_busca(busca)
-
-        # Montar filtro de data
-        data_filtro = ""
-        if data_inicial or data_final:
-            di = re.sub(r"\D", "", data_inicial) if data_inicial else ""
-            df = re.sub(r"\D", "", data_final) if data_final else ""
-            partes = []
-            if di:
-                partes.append(f"@DTPB >= {di}")
-            if df:
-                partes.append(f"@DTPB <= {df}")
-            data_filtro = " E ".join(partes)
-
-        browser = await uc.start(headless=False)
-        try:
-            # Navegar para a pagina principal (resolve Cloudflare)
-            page = await browser.get(f"{STJ_BASE}/")
-            # Polling do form (em vez de sleep fixo): so prossegue quando o campo existe.
-            tem_form = await _poll(
-                page,
-                "!!document.getElementById('frmConsulta') "
-                "&& !!document.querySelector('input[name=\"livre\"]')",
-                _CF_WAIT,
-            )
-            if not tem_form:
-                raise RuntimeError(
-                    "STJ SCON: formulario de busca nao carregou (Cloudflare/layout/timeout)."
-                )
-
-            # Preencher formulario e submeter via JavaScript
-            # O form frmConsulta tem campos hidden: livre, b, data, etc.
-            js_busca = busca_normalizada.replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"')
-            js_data = data_filtro.replace("\\", "\\\\").replace("'", "\\'")
-            num_docs = min(max_resultados, 50)
-
-            await page.evaluate(f'''
-                (function() {{
-                    var form = document.getElementById('frmConsulta');
-                    form.querySelector('input[name="livre"]').value = '{js_busca}';
-                    // Campos de data (dtpb1, dtpb2) para filtro
-                    var dtpb1 = form.querySelector('input[name="dtpb1"]');
-                    var dtpb2 = form.querySelector('input[name="dtpb2"]');
-                    if (dtpb1) dtpb1.value = '{data_inicial.replace("'", "")}';
-                    if (dtpb2) dtpb2.value = '{data_final.replace("'", "")}';
-                    form.submit();
-                }})();
-            ''')
-            # Polling dos resultados: encerra quando div.documento aparece OU quando a
-            # pagina sinaliza busca sem resultados (evita capturar a pagina em branco).
-            await _poll(
-                page,
-                "document.querySelectorAll('div.documento').length > 0 "
-                "|| /n[ãa]o encontrou|nenhum documento|0 documento/i.test("
-                "document.body ? document.body.innerText : '')",
-                _RESULT_WAIT,
-            )
-
-            # Obter HTML da pagina de resultados
-            content = await page.get_content()
-
-            return self._parse_resultados(content, base_upper, max_resultados)
-        finally:
-            browser.stop()
+        """Wrapper async: roda o fluxo CDP (bloqueante) numa thread para nao travar
+        o event loop do servidor MCP."""
+        import asyncio
+        return await asyncio.to_thread(
+            self.buscar, busca, base, data_inicial, data_final, max_resultados
+        )
 
     def _parse_resultados(
         self, html_text: str, base: str, max_resultados: int,
@@ -176,9 +139,7 @@ class STJClient:
         resultados: List[ResultadoJuridico] = []
         soup = BeautifulSoup(html_text, "html.parser")
 
-        # Blocos de resultado: div.documento
         items = soup.find_all("div", class_="documento")
-
         for item in items[:max_resultados]:
             try:
                 r = self._parse_item(item, base)
@@ -186,7 +147,6 @@ class STJClient:
                     resultados.append(r)
             except Exception:
                 continue
-
         return resultados
 
     def _parse_item(self, item: BeautifulSoup, base: str) -> Optional[ResultadoJuridico]:
@@ -196,7 +156,6 @@ class STJClient:
             tipo="Acordao" if base == "ACOR" else "Decisao Monocratica",
         )
 
-        # Extrair campos via div.paragrafoBRS > docTitulo + docTexto
         paragrafos = item.find_all(class_="paragrafoBRS")
         for p in paragrafos:
             titulo_el = p.find(class_="docTitulo")
@@ -208,7 +167,6 @@ class STJClient:
             texto = texto_el.get_text(strip=True)
 
             if "Processo" in titulo or (not titulo and not resultado.numero):
-                # Extrair classe e numero do processo
                 proc_match = re.search(
                     r'((?:REsp|AgRg|AREsp|RHC|HC|RMS|CC|EDcl|AgInt|Pet|RvCr|'
                     r'EREsp|MS|Rcl|AR|SD|IDC|MI|IF|SE|CR|EAREsp|RCD)\s+[\d/.]+)',
@@ -234,7 +192,6 @@ class STJClient:
 
             elif "Data da Publicação" in titulo or "Data da Publica" in titulo:
                 if not resultado.data:
-                    # Extrair data do texto (ex: "DJe 17/03/2021")
                     data_match = re.search(r'\d{2}/\d{2}/\d{4}', texto)
                     resultado.data = data_match.group() if data_match else texto
 
