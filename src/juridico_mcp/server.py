@@ -406,7 +406,8 @@ def jusbrasil_jurisprudencia_buscar(
             "STJ", "TST", "TSE", "STM", "TCU", "TNU", "TRU", "CNJ", "CARF",
             "TJ", "TRF", "TRT", "TRE", "TJM", "TCE". O filtro e por familia
             (STJ agrupa seus orgaos; TJ agrupa todos os TJs estaduais).
-        tipo: tipo de julgado — "todos" (default), "acordao", "sumula".
+        tipo: tipo de julgado — "todos" (default), "acordao", "sumula",
+            "decisao", "sentenca", "despacho".
 
     Returns:
         Jurisprudencia formatada com tribunal, tipo, data, ementa e link.

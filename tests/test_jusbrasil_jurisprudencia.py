@@ -200,10 +200,18 @@ def test_montar_url_tipo_todos_e_default_sem_param():
     assert "jurisType=" not in jur._montar_url("x", 1, tipo="")
 
 
-def test_montar_url_tipo_aceita_token_cru():
-    # Demais opcoes do menu seguem o mesmo padrao de token unico (nao capturados):
-    # passam como token cru, igual ao passthrough de periodo.
-    assert "jurisType=decisao" in jur._montar_url("x", 1, tipo="decisao")
+def test_montar_url_tipo_demais_opcoes_confirmadas():
+    # Recon 2026-06-24: decisao/sentenca/despacho confirmados ao vivo (singular
+    # minusculo sem acento), incl. formas plurais/acentuadas do menu.
+    assert "jurisType=decisao" in jur._montar_url("x", 1, tipo="Decisões")
+    assert "jurisType=sentenca" in jur._montar_url("x", 1, tipo="Sentenças")
+    assert "jurisType=despacho" in jur._montar_url("x", 1, tipo="Despachos")
+
+
+def test_montar_url_tipo_token_cru_e_valvula_seguranca():
+    # Token alfabetico fora do mapa ainda passa como token cru (valvula de
+    # seguranca para tipos futuros), igual ao passthrough de periodo.
+    assert "jurisType=xyz" in jur._montar_url("x", 1, tipo="xyz")
 
 
 def test_montar_url_combina_tribunal_e_tipo():

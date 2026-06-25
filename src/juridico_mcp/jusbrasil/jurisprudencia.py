@@ -132,14 +132,17 @@ _TRIBUNAL_FILTRO = frozenset({
     "CNJ", "CARF", "TJ", "TRF", "TRT", "TRE", "TJM", "TCE",
 })
 
-# Tipo de julgado -> token jurisType. Confirmados ao vivo: acordao, sumula.
-# "todos" = default (sem param). Demais opcoes do menu (Decisoes/Sentencas/
-# Despachos) seguem o mesmo padrao de token unico, mas os tokens exatos nao foram
-# capturados: passam como token cru (mesmo passthrough do periodo Ndias).
+# Tipo de julgado -> token jurisType. Todas as 6 opcoes do menu confirmadas ao
+# vivo (recon Claude in Chrome 2026-06-24): a forma e sempre o singular minusculo
+# sem acento do tipo. "todos" = default (sem param). Token alfabetico fora do mapa
+# ainda passa como token cru (valvula de seguranca, igual ao passthrough Ndias).
 _JURISTYPE_TOKEN = {
     "todos": "", "qualquer": "",
     "acordao": "acordao", "acordaos": "acordao",
     "sumula": "sumula", "sumulas": "sumula",
+    "decisao": "decisao", "decisoes": "decisao",
+    "sentenca": "sentenca", "sentencas": "sentenca",
+    "despacho": "despacho", "despachos": "despacho",
 }
 _JURISTYPE_CRU_RE = re.compile(r"^[a-z]+$")
 
@@ -213,7 +216,8 @@ def buscar(termo: str, *, pagina: int = 1, max_resultados: int = 10,
     periodo: recorte por data — "qualquer" (default), "mes", "ano", "2anos",
              "3anos", "5anos" (ou token cru tipo "365dias").
     tribunal: sigla-familia para filtrar (ex. "STJ", "TJ", "TRF"); "" = todos.
-    tipo: tipo de julgado — "todos" (default), "acordao", "sumula" (ou token cru).
+    tipo: tipo de julgado — "todos" (default), "acordao", "sumula", "decisao",
+          "sentenca", "despacho" (ou token cru).
     """
     url = _montar_url(termo, pagina, ordenar, periodo, tribunal, tipo)
     records = _session.abrir_dom(url, EXTRACT_JS, cdp_url=cdp_url)
