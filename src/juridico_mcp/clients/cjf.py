@@ -29,6 +29,28 @@ HEADERS_POST = {
     "X-Requested-With": "XMLHttpRequest",
 }
 
+# O checkbox de tribunal e um componente JSF com ID auto-gerado (j_idtNN) que
+# DRIFTA entre deploys do CJF (visto: j_idt51 -> j_idt59). Por isso o name e
+# descoberto dinamicamente da pagina (pelo input cujo value e uma sigla conhecida);
+# o default abaixo e so um fallback de ultimo recurso.
+_DEFAULT_CAMPO_TRIBUNAL = "formulario:j_idt59"
+_INPUT_RE = re.compile(r"<input\b[^>]*>", re.I)
+_SIGLA_TRIBUNAL_RE = re.compile(r'value="(?:STF|STJ|TNU|TRF[1-6])"')
+_NAME_ATTR_RE = re.compile(r'name="([^"]+)"')
+
+
+def _descobrir_campo_tribunal(html_pagina: str) -> str:
+    """Descobre o name do checkbox de tribunal pelo input cujo value e uma sigla
+    conhecida (drift-proof contra a troca do ID JSF auto-gerado)."""
+    for m in _INPUT_RE.finditer(html_pagina or ""):
+        tag = m.group(0)
+        if _SIGLA_TRIBUNAL_RE.search(tag):
+            nm = _NAME_ATTR_RE.search(tag)
+            if nm:
+                return nm.group(1)
+    return _DEFAULT_CAMPO_TRIBUNAL
+
+
 BASES_CJF = {
     "STF": "Supremo Tribunal Federal",
     "STJ": "Superior Tribunal de Justica",
@@ -51,12 +73,16 @@ class CJFClient:
             follow_redirects=True,
         )
         self._viewstate: Optional[str] = None
+        self._campo_tribunal: Optional[str] = None
 
     @retry(wait=wait_exponential(multiplier=1, min=2, max=10), stop=stop_after_attempt(3))
     def _obter_viewstate(self) -> str:
         """Obtem ViewState da pagina inicial JSF."""
         resp = self._client.get(CJF_URL)
         resp.raise_for_status()
+
+        # Descobre o name do checkbox de tribunal na mesma carga (ID JSF drifta).
+        self._campo_tribunal = _descobrir_campo_tribunal(resp.text)
 
         match = re.search(r'name="javax\.faces\.ViewState"[^>]*value="([^"]+)"', resp.text)
         if match:
@@ -102,10 +128,12 @@ class CJFClient:
             ("formulario:textoLivre", busca),
         ]
 
-        # Adicionar bases selecionadas (multiplos valores)
+        # Adicionar bases selecionadas (multiplos valores). O name do campo e
+        # descoberto da pagina (ID JSF drifta entre deploys: j_idt51 -> j_idt59 -> ...).
+        campo_tribunal = self._campo_tribunal or _DEFAULT_CAMPO_TRIBUNAL
         for base in lista_bases:
             if base in BASES_CJF:
-                form_data.append(("formulario:j_idt51", base))
+                form_data.append((campo_tribunal, base))
 
         form_data.append(("javax.faces.ViewState", self._viewstate or ""))
 
