@@ -23,6 +23,19 @@ class ResultadoJuridico:
     extras: dict = field(default_factory=dict)
 
 
+def clampar(n, lo: int = 1, hi: int = 50) -> int:
+    """Restringe max_resultados ao intervalo documentado [lo, hi].
+
+    Tolera entrada nao-inteira/negativa (evita slices patologicos do tipo
+    lista[:-3] ou tamanhoPagina=0 nos clients que nao clampavam).
+    """
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        return lo
+    return max(lo, min(n, hi))
+
+
 def truncar(texto: str, max_chars: int = 20000) -> str:
     """Trunca texto preservando ultimo ponto."""
     if not texto or len(texto) <= max_chars:

@@ -41,3 +41,50 @@ def test_cdp_session_init_guarda_host_e_porta():
 
 def test_cdp_session_expired_e_runtime_error():
     assert issubclass(cdp_common.CdpSessionExpired, RuntimeError)
+
+
+def _session_com_ws(timeout=7.0):
+    s = cdp_common.CdpSession("http://127.0.0.1:9222", timeout=timeout)
+    s._ws = object()
+    return s
+
+
+def test_cmd_passa_recv_timeout(monkeypatch):
+    # _cmd deve passar recv_timeout=self.timeout para nao bloquear indefinidamente.
+    capt = {}
+
+    def fake_call(ws, method, params, msg_id, recv_timeout=None):
+        capt["recv_timeout"] = recv_timeout
+        return {"result": {}}
+
+    monkeypatch.setattr(cdp_common._cdp, "cdp_call", fake_call)
+    _session_com_ws(timeout=7.0)._cmd("Page.enable")
+    assert capt["recv_timeout"] == 7.0
+
+
+def test_cmd_levanta_em_erro_de_protocolo(monkeypatch):
+    monkeypatch.setattr(
+        cdp_common._cdp, "cdp_call", lambda *a, **k: {"error": {"message": "boom"}}
+    )
+    with pytest.raises(cdp_common._cdp.CdpError):
+        _session_com_ws()._cmd("Page.navigate", {"url": "x"})
+
+
+def test_evaluate_sync_levanta_em_js_error(monkeypatch):
+    # JS que lanca (subtype=="error") nao pode mais virar None silencioso.
+    monkeypatch.setattr(
+        cdp_common._cdp,
+        "cdp_call",
+        lambda *a, **k: {"result": {"result": {"subtype": "error", "description": "ReferenceError"}}},
+    )
+    with pytest.raises(cdp_common._cdp.CdpError):
+        _session_com_ws().evaluate("foo.bar()")
+
+
+def test_evaluate_sync_retorna_valor_normal(monkeypatch):
+    monkeypatch.setattr(
+        cdp_common._cdp,
+        "cdp_call",
+        lambda *a, **k: {"result": {"result": {"value": "complete"}}},
+    )
+    assert _session_com_ws().evaluate("document.readyState") == "complete"

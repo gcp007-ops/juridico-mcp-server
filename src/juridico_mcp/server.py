@@ -15,7 +15,7 @@ from .clients.cjf import get_client as get_cjf, BASES_CJF
 from .clients.stj import get_client as get_stj
 from .clients.bnp import get_client as get_bnp, TIPOS_PRECEDENTES
 from .clients.tjdft import get_client as get_tjdft, BASES_TJDFT
-from .shared import formatar_resultados_texto, ResultadoJuridico
+from .shared import formatar_resultados_texto, ResultadoJuridico, clampar
 from .rt import jurisprudencia as rt_juris
 from .rt import delivery as rt_delivery
 from .jusbrasil import jurisprudencia as jb_juris
@@ -59,7 +59,7 @@ def cjf_buscar_jurisprudencia(
     """
     try:
         client = get_cjf()
-        resultados = client.buscar(busca, bases, max_resultados)
+        resultados = client.buscar(busca, bases, clampar(max_resultados, hi=50))
         return formatar_resultados_texto(
             resultados,
             titulo=f"CJF Jurisprudencia [{bases}]",
@@ -121,7 +121,7 @@ async def stj_buscar_jurisprudencia(
     """
     try:
         client = get_stj()
-        resultados = await client.buscar_async(busca, base, data_inicial, data_final, max_resultados)
+        resultados = await client.buscar_async(busca, base, data_inicial, data_final, clampar(max_resultados, hi=50))
         tipo = "Acordaos" if base.upper() == "ACOR" else "Monocraticas"
         return formatar_resultados_texto(
             resultados,
@@ -174,7 +174,7 @@ def bnp_buscar_precedentes(
     """
     try:
         client = get_bnp()
-        resultados, total = client.buscar(busca, orgaos, tipos, max_resultados)
+        resultados, total = client.buscar(busca, orgaos, tipos, clampar(max_resultados, hi=50))
 
         texto = formatar_resultados_texto(
             resultados,
@@ -235,7 +235,7 @@ def tjdft_buscar_jurisprudencia(
     """
     try:
         client = get_tjdft()
-        resultados, total = client.buscar(busca, max_resultados, sinonimos)
+        resultados, total = client.buscar(busca, clampar(max_resultados, hi=100), sinonimos)
         return formatar_resultados_texto(
             resultados,
             titulo="TJDFT JurisDF",
@@ -296,11 +296,11 @@ async def rt_jurisprudencia_buscar(
         ResultadoJuridico(
             fonte="rt",
             tipo="acordao",
-            numero=r["numero_processo"],
-            orgao=r["tribunal"],
-            relator=r["relator"],
-            data=r["data_julgamento"],
-            url=r["url"],
+            numero=r.get("numero_processo", ""),
+            orgao=r.get("tribunal", ""),
+            relator=r.get("relator", ""),
+            data=r.get("data_julgamento", ""),
+            url=r.get("url", ""),
             extras={
                 "jrp": r.get("jrp"),
                 "veiculo": r.get("veiculo"),
