@@ -1,13 +1,15 @@
 """
 juridico-mcp-server — MCP Server para Jurisprudencia Brasileira
 
-Consolida 4 fontes publicas:
-1. CJF (Jurisprudencia Unificada STF/STJ/TRFs)
-2. STJ SCON (Acordaos e monocraticas do STJ)
-3. BNP/Pangea (Precedentes qualificados com tese firmada)
-4. TJDFT JurisDF (Acordaos e monocraticas do TJDFT)
+Consolida 6 fontes:
+1. CJF (Jurisprudencia Unificada STF/STJ/TRFs) — httpx
+2. STJ SCON (Acordaos e monocraticas do STJ) — Chrome dedicado/CDP (aba de fundo)
+3. BNP/Pangea (Precedentes qualificados com tese firmada) — httpx
+4. TJDFT JurisDF (Acordaos e monocraticas do TJDFT) — httpx
+5. RT Online (jurisprudencia premium + inteiro teor) — Chrome dedicado/CDP
+6. Jusbrasil (TJs estaduais/TRTs agregados + inteiro teor) — Chrome dedicado/CDP
 
-Transporte: stdio (Claude Desktop) ou HTTP
+Transporte: stdio (Claude Desktop) ou HTTP. Roteamento entre fontes: listar_fontes().
 """
 
 from mcp.server.fastmcp import FastMCP
@@ -35,28 +37,26 @@ def cjf_buscar_jurisprudencia(
     max_resultados: int = 10,
     completo: bool = False,
 ) -> str:
-    """
-    Busca jurisprudencia unificada no portal CJF.
-    Inclui acordaos do STF, STJ, TRF1 a TRF6.
+    """Jurisprudencia federal UNIFICADA (STF, STJ, TRF1-6) no portal CJF.
 
-    SINTAXE CJF (diferente do BNP!):
-    - "termo1 E termo2" = AND
-    - "termo1 OU termo2" = OR
-    - "NAO termo" = exclusao
-    - "termo1 ADJ termo2" = adjacencia
-    - "termo1 PROX5 termo2" = proximidade (5 palavras)
+    QUANDO USAR: varredura ampla por tema na esfera federal/superior. Para
+    precedente vinculante com tese firmada -> bnp_buscar_precedentes; para um TJ
+    estadual -> jusbrasil_jurisprudencia_buscar.
+
+    SINTAXE CJF (operadores MAIUSCULOS; NAO confundir com BNP): `E` (AND), `OU`
+    (OR), `NAO` (exclui), `ADJ` (adjacencia), `PROX5` (proximidade 5 palavras).
+    Ex.: "dano moral E consumidor".
 
     Args:
-        busca: Query com sintaxe CJF (E, OU, NAO, ADJ, PROX)
-        bases: Tribunais separados por virgula. Opcoes: STF, STJ, TRF1, TRF2, TRF3, TRF4, TRF5, TRF6
-        max_resultados: Limite de resultados (1-50, padrao 10)
+        busca: query na sintaxe CJF (E/OU/NAO/ADJ/PROX).
+        bases: tribunais por virgula — STF, STJ, TRF1..TRF6, TNU (default "STJ").
+        max_resultados: 1-50 (default 10; clampado).
+        completo: False (default) = ementa em PREVIEW (economiza tokens); True =
+            ementa integral. CJF nao tem inteiro teor — a ementa E o conteudo, use
+            completo=True para analisar o acordao a fundo.
 
-    Returns:
-        Acordaos formatados com ementa, relator, orgao, data
-
-    Examples:
-        - busca="dano moral E consumidor", bases="STJ"
-        - busca="plano de saude E reajuste NAO coletivo", bases="STJ,TRF1"
+    Returns: lista (numero, orgao, relator, data, ementa, link); duplicatas por
+        numero (mesmo acordao em bases diferentes) sao removidas.
     """
     try:
         client = get_cjf()
@@ -82,45 +82,26 @@ async def stj_buscar_jurisprudencia(
     max_resultados: int = 10,
     completo: bool = False,
 ) -> str:
-    """
-    Busca jurisprudencia no STJ via SCON.
-    Acordaos colegiados e decisoes monocraticas com ementa e inteiro teor.
+    """Busca no STJ SCON: acordaos (base="ACOR") e decisoes monocraticas (base="MONO").
 
-    NOTA: Usa browser real (nodriver) para contornar Cloudflare.
-    Primeira busca demora ~20s. Requer Chrome instalado.
+    SERVER-ONLY: roda em ABA DE FUNDO no Chrome dedicado (STJ_CDP_URL, default
+    http://127.0.0.1:9222) — NAO abre janela. A 1a busca leva ~6-10s (Cloudflare
+    auto-resolve no navegador real); sem o Chrome dedicado, degrada com erro.
 
-    CRITICO -- BUSCA POR NUMERACAO:
-        Para localizar um processo/acordao pelo numero, passe APENAS digitos
-        sequenciados. NAO usar pontos, hifens, barras ou espacos.
-
-        Errado:  busca="1234567-89.2024.3.00.0000"   (CNJ formatado)
-        Errado:  busca="REsp 1.234.567"              (formato com pontos)
-        Errado:  busca="REsp 1.234.567/SP"           (com UF e barra)
-        Certo:   busca="12345678920243000000"        (CNJ so digitos)
-        Certo:   busca="REsp 1234567"                (classe + digitos)
-        Certo:   busca="1234567"                     (so o numero sequencial)
-
-        Justificativa: o campo "livre" do SCON e match literal/tokenizado;
-        pontuacao quebra o casamento. Use digitos puros para o numero e,
-        opcionalmente, a sigla da classe processual (REsp, AgRg, HC, etc).
+    NUMERO DE PROCESSO: passe APENAS digitos (sem pontos/hifens/barras) — o campo
+    livre do SCON e match literal e pontuacao quebra o casamento.
+        Certo:  "12345678920243000000" (CNJ) | "REsp 1234567" (classe+digitos)
+        Errado: "1234567-89.2024.3.00.0000" | "REsp 1.234.567/SP"
 
     Args:
-        busca: Termo de busca livre (ex: "dano moral", "sumula 7").
-               Para numero de processo/acordao: APENAS digitos, sem
-               pontos/hifens/barras. Ver "CRITICO -- BUSCA POR NUMERACAO".
-        base: "ACOR" para acordaos, "MONO" para monocraticas
-        data_inicial: Formato DD/MM/AAAA (opcional)
-        data_final: Formato DD/MM/AAAA (opcional)
-        max_resultados: Limite (1-50, padrao 10)
+        busca: texto livre (ex.: "dano moral"); numero = so digitos (ver acima).
+        base: "ACOR" (acordaos, default) ou "MONO" (monocraticas).
+        data_inicial/data_final: DD/MM/AAAA (data de julgamento), opcionais.
+        max_resultados: 1-50 (default 10; clampado).
+        completo: False (default) = ementa em PREVIEW; True = ementa integral. STJ
+            nao expoe inteiro teor por tool — a ementa E o conteudo.
 
-    Returns:
-        Decisoes formatadas com numero, relator, ementa, orgao julgador
-
-    Examples:
-        - busca="plano de saude reajuste abusivo", base="ACOR"
-        - busca="responsabilidade civil objetiva", data_inicial="01/01/2024"
-        - busca="REsp 1234567", base="ACOR"                # numero sem pontos
-        - busca="12345678920243000000", base="ACOR"        # CNJ so digitos
+    Returns: lista (numero, relator, orgao, data, ementa, link).
     """
     try:
         client = get_stj()
@@ -146,36 +127,26 @@ def bnp_buscar_precedentes(
     max_resultados: int = 10,
     completo: bool = False,
 ) -> str:
-    """
-    Busca precedentes qualificados no Banco Nacional de Precedentes (BNP/Pangea).
-    Retorna tese firmada, questao juridica, situacao e processos paradigma.
+    """Precedentes QUALIFICADOS (art. 927 CPC) no BNP/Pangea: tese firmada, questao
+    juridica, situacao e processos paradigma.
 
-    SINTAXE BNP (diferente da CJF!):
-    - +termo = obrigatorio (AND)
-    - -termo = excluido (NOT)
-    - "frase" = expressao exata
-    - NAO funcionam: E, OU, NAO, AND, OR, NOT
+    QUANDO USAR: quando a tese exige um precedente VINCULANTE/PERSUASIVO, nao
+    jurisprudencia geral (para esta, use cjf/stj/jusbrasil). Hierarquia: RG
+    (Repercussao Geral/STF, erga omnes) > RR (Repetitivo/STJ) > SV (Sumula
+    Vinculante) > SUM (sumula, persuasiva) > IRDR/IAC (regional).
 
-    HIERARQUIA DE PRECEDENTES:
-    1. RG (Repercussao Geral STF) - vinculante erga omnes
-    2. RR (Recurso Repetitivo STJ) - vinculante
-    3. SV (Sumula Vinculante STF) - vinculante
-    4. SUM (Sumula STF/STJ) - altamente persuasivo
-    5. IRDR/IAC - persuasivo regional
+    SINTAXE BNP (NAO use E/OU/NAO): `+termo` (obrigatorio), `-termo` (exclui),
+    `"frase"` (exata). Ex.: '+plano +saude +reajuste', '"tema 1066"'.
 
     Args:
-        busca: Query com sintaxe BNP (+termo, -termo, "frase")
-        orgaos: Orgaos separados por virgula (STF, STJ, TST, TSE, STM, TRFs, TJs)
-        tipos: Tipos: RG, RR, SV, SUM, IRDR, IAC, PUIL (separados por virgula)
-        max_resultados: Limite (1-50, padrao 10)
+        busca: sintaxe BNP (+/-/"frase").
+        orgaos: por virgula — STF, STJ, TST, TSE, STM, TRFs, TJs (default "STF,STJ").
+        tipos: RG, RR, SV, SUM, IRDR, IAC, PUIL (default "RG,RR,SV,SUM").
+        max_resultados: 1-50 (default 10; clampado).
+        completo: False (default) = tese/questao em PREVIEW; True = integral.
 
-    Returns:
-        Precedentes com tese firmada, questao juridica, situacao, paradigmas
-
-    Examples:
-        - busca='+plano +saude +reajuste', orgaos="STJ"
-        - busca='"tema 1066"', orgaos="STF", tipos="RG"
-        - busca='+ICMS +"base de calculo" +PIS', orgaos="STF,STJ"
+    Returns: precedentes (tese, questao, situacao, paradigmas). Os com situacao
+        PENDENTE (sem tese firmada) sao sinalizados ao final.
     """
     try:
         client = get_bnp()
@@ -217,28 +188,22 @@ def tjdft_buscar_jurisprudencia(
     sinonimos: bool = True,
     completo: bool = False,
 ) -> str:
-    """
-    Busca jurisprudencia no TJDFT via JurisDF.
-    Acordaos, monocraticas e decisoes de turmas recursais.
+    """Jurisprudencia do TJDFT (TJ do DF e Territorios) via JurisDF: acordaos,
+    monocraticas e turmas recursais.
 
-    SINTAXE JurisDF (operadores em MAIUSCULO):
-    - "termo1 E termo2" = AND
-    - "termo1 OU termo2" = OR
-    - "NAO termo" = exclusao
-    - "frase exata" entre aspas
-    - termo$ = wildcard (bio$ encontra biologia, biografia)
+    QUANDO USAR: tese que precisa de jurisprudencia do DF. Outros TJs estaduais ->
+    jusbrasil_jurisprudencia_buscar.
+
+    SINTAXE JurisDF (operadores MAIUSCULOS): `E`/`OU`/`NAO`, "frase exata",
+    `termo$` (wildcard: bio$ -> biologia/biografia). Ex.: '"dano moral" E consumidor'.
 
     Args:
-        busca: Query JurisDF (E, OU, NAO, "aspas", $wildcard)
-        max_resultados: Limite (1-100, padrao 10)
-        sinonimos: Expandir busca com sinonimos (default True)
+        busca: query JurisDF.
+        max_resultados: 1-100 (default 10; clampado).
+        sinonimos: expande a busca com sinonimos (default True).
+        completo: False (default) = ementa em PREVIEW; True = ementa integral.
 
-    Returns:
-        Decisoes formatadas com ementa, relator, orgao, data
-
-    Examples:
-        - busca='"dano moral" E consumidor'
-        - busca='"plano de saude" E reajuste NAO coletivo'
+    Returns: lista (numero, orgao, relator, data, ementa).
     """
     try:
         client = get_tjdft()
@@ -267,23 +232,27 @@ async def rt_jurisprudencia_buscar(
     data_ate: str = "",
     max_resultados: int = 10,
 ) -> str:
-    """Busca jurisprudência premium na RT Online (server-only via Chrome dedicado/CDP).
+    """Jurisprudência premium da RT Online (Revista dos Tribunais). SERVER-ONLY via
+    Chrome dedicado logado (RT_CDP_URL); degrada com erro sem a sessão.
+
+    QUANDO USAR: jurisprudência curada/premium e, sobretudo, quando precisar do
+    INTEIRO TEOR de um julgado — a busca devolve a URL e, com ela,
+    rt_capturar_md(doc_url) entrega o teor em Markdown e rt_baixar_pdf(doc_url) o PDF.
 
     Pelo menos um de livre/numero/relator é obrigatório. Ano único OU intervalo
-    (data_de/data_ate em dd/mm/aaaa, data de julgamento). Requer RT_CDP_URL.
+    (data_de/data_ate). Cabeçalho validado p/ TRT/TST; metadados parciais em STF/STJ.
 
     Args:
-        livre: Texto livre para busca
-        numero: Número do processo
-        relator: Nome do relator
-        tribunais: Tribunais separados por vírgula
-        ano: Ano de julgamento (ex: "2024")
-        data_de: Data inicial em dd/mm/aaaa (data de julgamento)
-        data_ate: Data final em dd/mm/aaaa (data de julgamento)
-        max_resultados: Limite de resultados (1-50, padrão 10)
+        livre: texto livre.
+        numero: número do processo.
+        relator: nome do relator.
+        tribunais: siglas por vírgula.
+        ano: ano de julgamento (ex.: "2024").
+        data_de/data_ate: dd/mm/aaaa (data de julgamento).
+        max_resultados: 1-50 (default 10; clampado).
 
-    Returns:
-        Acórdãos formatados com número, relator, tribunal, data, JRP e link
+    Returns: lista (número, relator, tribunal, data, JRP, link). Use a URL com
+        rt_capturar_md / rt_baixar_pdf para o inteiro teor.
     """
     if not any(s.strip() for s in (livre, numero, relator)):
         return "Parametro invalido: informe ao menos livre, numero ou relator."
@@ -505,63 +474,34 @@ def jusbrasil_inteiro_teor(doc_url: str, gravar: bool = False) -> str:
 
 @mcp.tool()
 def listar_fontes() -> str:
-    """Lista todas as fontes de jurisprudencia disponiveis neste server."""
-    return """Fontes disponiveis no juridico-mcp-server:
+    """Indice e roteamento das fontes de jurisprudencia. CHAME PRIMEIRO se estiver
+    em duvida sobre qual tool usar — cada fonte tem sintaxe propria."""
+    return """juridico-mcp-server — fontes de jurisprudencia (cada uma com SINTAXE PROPRIA).
 
-1. CJF (cjf_buscar_jurisprudencia)
-   Jurisprudencia unificada: STF, STJ, TRF1-TRF6
-   Sintaxe: E, OU, NAO, ADJ, PROX
-   Dados: Acordaos com ementa
+COMO ESCOLHER:
+- Precedente VINCULANTE / tese firmada (RG/RR/SV/SUM) -> bnp_buscar_precedentes
+- Jurisprudencia federal/superior AMPLA (STF/STJ/TRF) -> cjf_buscar_jurisprudencia
+- STJ especifico (acordao/monocratica; por numero)     -> stj_buscar_jurisprudencia
+- TJ do DF -> tjdft_buscar_jurisprudencia | outros TJs estaduais/TRTs -> jusbrasil
+- INTEIRO TEOR de um julgado -> jusbrasil_inteiro_teor (Jusbrasil) ou
+  rt_capturar_md/rt_baixar_pdf (RT). As demais fontes so devolvem EMENTA.
 
-2. STJ SCON (stj_buscar_jurisprudencia)
-   Acordaos e monocraticas do STJ
-   Sintaxe: Texto livre
-   Dados: Ementa, relator, orgao, inteiro teor
+FONTES:
+1. cjf_buscar_jurisprudencia  — STF/STJ/TRF1-6 unificado. Sintaxe: E/OU/NAO/ADJ/PROX. (httpx)
+2. stj_buscar_jurisprudencia  — STJ SCON (base ACOR/MONO). Texto livre; numero = SO digitos.
+   Server-only: aba de fundo no Chrome dedicado (sem janela); 1a busca ~6-10s.
+3. bnp_buscar_precedentes     — precedentes qualificados (tese firmada). Sintaxe: +termo/-termo/"frase". (httpx)
+4. tjdft_buscar_jurisprudencia— TJDFT (DF). Sintaxe: E/OU/NAO/"aspas"/termo$ (wildcard). (httpx)
+5. RT Online (server-only, RT_CDP_URL) — premium + INTEIRO TEOR:
+   rt_jurisprudencia_buscar(livre/numero/relator/tribunais/ano/data) -> resultados (+URL);
+   rt_capturar_md(doc_url) -> Markdown; rt_baixar_pdf(doc_url) -> PDF.
+6. Jusbrasil (server-only, JUSBRASIL_CDP_URL :9222) — TJs estaduais/TRTs agregados + INTEIRO TEOR:
+   jusbrasil_jurisprudencia_buscar(termo, ordenar/periodo/tribunal/tipo, ...) -> resultados (+URL);
+   jusbrasil_inteiro_teor(doc_url) -> ~27k chars (gate citavel:false). Rate-limit >=2s/hit.
 
-3. BNP/Pangea (bnp_buscar_precedentes)
-   Precedentes qualificados (art. 927 CPC)
-   Sintaxe: +termo, -termo, "frase"
-   Dados: Tese firmada, questao juridica, situacao, paradigmas
-   Tipos: RG, RR, SV, SUM, IRDR, IAC, PUIL
-
-4. TJDFT JurisDF (tjdft_buscar_jurisprudencia)
-   Acordaos e monocraticas do TJDFT
-   Sintaxe: Texto livre
-   Dados: Ementa, relator, orgao
-
-5. RT Online — server-only via Chrome dedicado/CDP (requer RT_CDP_URL)
-   rt_jurisprudencia_buscar(livre/numero/relator/tribunais/ano/data_de/data_ate)
-     Busca jurisprudencia premium RT (cabeçalho validado para TRT/TST; metadados parciais em STJ/STF)
-   rt_baixar_pdf(doc_url)
-     Baixa o PDF do julgado; grava em THINKBOX_VAULT_PATH se definido
-   rt_capturar_md(doc_url, gravar)
-     Extrai o julgado como Markdown; gravar=True (default) grava nota julgado
-     na vault (requer THINKBOX_VAULT_PATH); gravar=False retorna so o markdown
-   Escopo atual: Jurisprudencia premium. Legislacao/sumulas em versoes futuras.
-   Obs: tools RT degradam sem CDP ativo; fontes httpx (CJF/STJ/BNP/TJDFT) intactas.
-
-6. Jusbrasil — jurisprudencia agregada, server-only via Chrome dedicado/CDP
-   (JUSBRASIL_CDP_URL, default http://127.0.0.1:9222; requer aba logada)
-   jusbrasil_jurisprudencia_buscar(termo, pagina, max_resultados, ordenar, periodo, tribunal, tipo)
-     Busca no acervo agregado (TJs estaduais, TRTs e orgaos pouco cobertos pelas
-     fontes httpx); texto livre; devolve ementa em preview + link.
-     Filtros: ordenar (relevancia/recente), periodo (mes/ano/2anos..),
-     tribunal (sigla-familia STF/STJ/TJ/TRF/TRT..), tipo (acordao/sumula)
-   jusbrasil_inteiro_teor(doc_url, gravar)
-     Inteiro teor do julgado (~27k chars) + metadados; gate citavel: false.
-     gravar=True grava nota julgado (Template-Julgado) em THINKBOX_VAULT_PATH;
-     gravar=False (default) retorna so o payload JSON
-   Rate-limit: pausa automatica >=2s entre hits; recomendado <=10-15 por sessao.
-   Obs: degrada sem CDP/sessao logada; fontes httpx intactas.
-
-NOTA: Cada fonte tem sintaxe de busca DIFERENTE.
-- CJF usa: E, OU, NAO, ADJ, PROX
-- BNP usa: +termo, -termo, "frase"
-- STJ e TJDFT: texto livre
-
-ECONOMIA DE TOKENS: as buscas com ementa (CJF/STJ/BNP/TJDFT/Jusbrasil) devolvem
-ementa em PREVIEW truncado por padrao. Use completo=True para o texto longo na
-lista, ou jusbrasil_inteiro_teor para o inteiro teor de um julgado especifico.
+ECONOMIA DE TOKENS: buscas com ementa (CJF/STJ/BNP/TJDFT/Jusbrasil) devolvem a
+ementa em PREVIEW por padrao; passe completo=True para a ementa integral NA LISTA.
+Para o inteiro teor da decisao use as tools dedicadas (RT/Jusbrasil).
 """
 
 
