@@ -106,3 +106,19 @@ def test_buscar_respeita_max_resultados(monkeypatch):
     monkeypatch.setattr(jb, "abrir_dom", lambda url, js, **k: SAMPLE)
     out = jur.buscar("x", max_resultados=1)
     assert len(out) == 1
+
+
+def test_montar_url_ordenar_recente_usa_o_data():
+    # Filtro de ordenacao confirmado ao vivo: o=data -> mais recente primeiro.
+    assert "o=data" in jur._montar_url("x", 1, "recente")
+
+
+def test_montar_url_ordenar_relevancia_e_default_sem_param():
+    assert "o=" not in jur._montar_url("x", 1, "relevancia")
+
+
+def test_buscar_passa_ordenar_recente(monkeypatch):
+    cap = {}
+    monkeypatch.setattr(jb, "abrir_dom", lambda url, js, **k: cap.update(url=url) or [])
+    jur.buscar("x", ordenar="recente")
+    assert "o=data" in cap["url"]

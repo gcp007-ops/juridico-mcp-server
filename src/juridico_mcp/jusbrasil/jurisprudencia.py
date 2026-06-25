@@ -106,16 +106,28 @@ def normalizar(records: List[dict]) -> List[dict]:
     return out
 
 
-def _montar_url(termo: str, pagina: int) -> str:
+# Ordenacao -> parametro de URL confirmado ao vivo (o=data == mais recente).
+# relevancia e o default do Jusbrasil (sem parametro).
+_ORDEM_PARAM = {"recente": "o=data", "relevancia": ""}
+
+
+def _montar_url(termo: str, pagina: int, ordenar: str = "relevancia") -> str:
     url = f"{BASE_HOST}/jurisprudencia/busca?q={quote(termo)}"
     if pagina and pagina > 1:
         url += f"&p={pagina}"
+    ordem = _ORDEM_PARAM.get((ordenar or "relevancia").lower(), "")
+    if ordem:
+        url += f"&{ordem}"
     return url
 
 
-def buscar(termo: str, *, pagina: int = 1, max_resultados: int = 10, cdp_url=None) -> List[dict]:
-    """Busca jurisprudencia agregada no Jusbrasil (sessao logada via CDP)."""
-    url = _montar_url(termo, pagina)
+def buscar(termo: str, *, pagina: int = 1, max_resultados: int = 10,
+           ordenar: str = "relevancia", cdp_url=None) -> List[dict]:
+    """Busca jurisprudencia agregada no Jusbrasil (sessao logada via CDP).
+
+    ordenar: "relevancia" (default) ou "recente" (mais novos primeiro).
+    """
+    url = _montar_url(termo, pagina, ordenar)
     records = _session.abrir_dom(url, EXTRACT_JS, cdp_url=cdp_url)
     if not isinstance(records, list):
         return []
