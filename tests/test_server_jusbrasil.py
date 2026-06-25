@@ -29,6 +29,12 @@ def test_jusbrasil_buscar_sem_termo():
     assert "invalido" in out.lower()
 
 
+def test_listar_fontes_menciona_jusbrasil():
+    txt = server.listar_fontes()
+    assert "jusbrasil_jurisprudencia_buscar" in txt
+    assert "jusbrasil_inteiro_teor" in txt
+
+
 def test_jusbrasil_buscar_propaga_erro(monkeypatch):
     def boom(termo, **k):
         raise RuntimeError("CDP caiu")

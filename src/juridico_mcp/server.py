@@ -510,6 +510,18 @@ def listar_fontes() -> str:
    Escopo atual: Jurisprudencia premium. Legislacao/sumulas em versoes futuras.
    Obs: tools RT degradam sem CDP ativo; fontes httpx (CJF/STJ/BNP/TJDFT) intactas.
 
+6. Jusbrasil — jurisprudencia agregada, server-only via Chrome dedicado/CDP
+   (JUSBRASIL_CDP_URL, default http://127.0.0.1:9222; requer aba logada)
+   jusbrasil_jurisprudencia_buscar(termo, pagina, max_resultados)
+     Busca no acervo agregado (TJs estaduais, TRTs e orgaos pouco cobertos pelas
+     fontes httpx); texto livre; devolve ementa (preview integral) + link
+   jusbrasil_inteiro_teor(doc_url, gravar)
+     Inteiro teor do julgado (~27k chars) + metadados; gate citavel: false.
+     gravar=True grava nota julgado (Template-Julgado) em THINKBOX_VAULT_PATH;
+     gravar=False (default) retorna so o payload JSON
+   Rate-limit: pausa automatica >=2s entre hits; recomendado <=10-15 por sessao.
+   Obs: degrada sem CDP/sessao logada; fontes httpx intactas.
+
 NOTA: Cada fonte tem sintaxe de busca DIFERENTE.
 - CJF usa: E, OU, NAO, ADJ, PROX
 - BNP usa: +termo, -termo, "frase"

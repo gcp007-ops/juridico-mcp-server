@@ -16,7 +16,7 @@ import re
 import time
 from typing import Optional
 
-from .session import JusbrasilCdpSession, cdp_url_or_raise, DEFAULT_TIMEOUT
+from .session import JusbrasilCdpSession, cdp_url_or_raise, DEFAULT_TIMEOUT, _throttle
 from . import jurisprudencia as _jur
 
 # Numero CNJ (NNNNNNN-DD.AAAA.J.TR.OOOO).
@@ -116,6 +116,7 @@ def extrair_inteiro_teor(doc_url: str, *, cdp_url: Optional[str] = None,
     """
     url = cdp_url_or_raise(cdp_url)
     slug = _jur._slug_from_href(doc_url)
+    _throttle()
     with JusbrasilCdpSession(url, timeout=timeout) as s:
         s.navigate(doc_url)
         s.wait_ready(extra=2.0)

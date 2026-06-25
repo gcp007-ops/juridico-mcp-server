@@ -9,6 +9,7 @@ E3 (busca) e E4 (inteiro teor) reutilizam.
 """
 from __future__ import annotations
 
+import time
 from typing import Optional
 
 from ..cdp_common import DEFAULT_TIMEOUT, CdpSession
@@ -19,6 +20,21 @@ BASE_HOST = "https://www.jusbrasil.com.br"
 # Recon E1: a aba logada do :9222 dirige o Jusbrasil sem Cloudflare/paywall.
 # Diferente da RT, o CDP url e opcional (default :9222); JUSBRASIL_CDP_URL sobrescreve.
 DEFAULT_CDP_URL = "http://127.0.0.1:9222"
+
+# Rate-limit: intervalo minimo entre hits ao Jusbrasil (ToS/anti-bot).
+# O cap de 10-15/sessao e guideline documentada (listar_fontes/docstrings); aqui
+# garantimos a pausa concreta >=2s entre carregamentos de pagina.
+_MIN_INTERVALO = 2.0
+_last_hit = [0.0]  # holder mutavel do timestamp monotonico do ultimo hit
+
+
+def _throttle(now=time.monotonic, sleep=time.sleep) -> None:
+    """Garante >= _MIN_INTERVALO segundos desde o ultimo hit ao Jusbrasil."""
+    if _last_hit[0]:
+        elapsed = now() - _last_hit[0]
+        if elapsed < _MIN_INTERVALO:
+            sleep(_MIN_INTERVALO - elapsed)
+    _last_hit[0] = now()
 
 
 class JusbrasilCdpSession(CdpSession):
@@ -47,6 +63,7 @@ def abrir_dom(
     aba de fundo, navega, espera readyState=complete e avalia o JS.
     """
     resolved = cdp_url_or_raise(cdp_url)
+    _throttle()
     with JusbrasilCdpSession(resolved, timeout=timeout) as s:
         s.navigate(url)
         s.wait_ready(extra=extra_wait)

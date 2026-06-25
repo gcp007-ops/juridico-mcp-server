@@ -91,6 +91,7 @@ def test_extrair_inteiro_teor_monta_payload(monkeypatch):
             }
 
     monkeypatch.setattr(it, "JusbrasilCdpSession", FakeSession)
+    monkeypatch.setattr(it, "_throttle", lambda: None)
     monkeypatch.setattr(it.time, "sleep", lambda *_: None)
     monkeypatch.delenv("JUSBRASIL_CDP_URL", raising=False)
 
