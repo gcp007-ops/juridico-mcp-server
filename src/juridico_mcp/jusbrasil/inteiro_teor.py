@@ -19,13 +19,19 @@ from typing import Optional
 from .session import JusbrasilCdpSession, cdp_url_or_raise, DEFAULT_TIMEOUT, _throttle
 from . import jurisprudencia as _jur
 
-# Numero CNJ (NNNNNNN-DD.AAAA.J.TR.OOOO).
+# Numero CNJ (NNNNNNN-DD.AAAA.J.TR.OOOO) — TJ/TRF.
 _CNJ_RE = re.compile(r"\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}")
 _RELATOR_RE = re.compile(r"Relator(?:\(a\))?\s*·\s*(.+)")
 _JULGADO_RE = re.compile(r"Julgado em\s*(\d{2}/\d{2}/\d{4})")
 _ORGAO_RE = re.compile(r"·\s*(.+)")
-# classe na linha de titulo: "TJ-MG - Apelação Cível: AC ..."
-_CLASSE_RE = re.compile(r"[A-Z]{2,4}-[A-Z]{2}\s*-\s*([^:·\n]+?)\s*:")
+# Classe e numero a partir da linha de titulo, corte-agnostico:
+#   "<Corte> <ABREV> - <CLASSE>: <NUMERO ...>"
+#   ex.: "TJ-MG - Apelação Cível: AC 0151627-76.2005.8.13.0054 ..."
+#        "STF - AG.REG. NO RECURSO EXTRAORDINÁRIO COM AGRAVO: ARE 1386809 SP"
+#        "STJ - AGRAVO INTERNO ...: AgInt nos EDcl na Rcl 42019 SP 2021/0212311-0"
+_TITULO_CLASSE_RE = re.compile(r" - ([^:·\n]+?):")
+_TITULO_NUM_RE = re.compile(r":\s*(.+)$")
+_PROCESSO_PREFIXO = re.compile(r"^\s*Processo\s+")
 
 # Abas/labels de navegacao que prefixam o texto do container de inteiro teor.
 _TAB_LABELS = {"resumo", "inteiro teor", "fatos", "documentos", "jurisprudência semelhante"}
@@ -65,22 +71,36 @@ AFTER_JS = r"""
 
 
 def _parse_metadata(lawsuit_label: str, top_text: str) -> dict:
-    fonte_num = lawsuit_label or top_text or ""
-    m_cnj = _CNJ_RE.search(fonte_num)
-    m_rel = _RELATOR_RE.search(top_text or "")
-    m_julg = _JULGADO_RE.search(top_text or "")
-    m_classe = _CLASSE_RE.search(top_text or "")
+    lawsuit_label = lawsuit_label or ""
+    top_text = top_text or ""
+    linhas = [l for l in top_text.split("\n") if l.strip()]
+    titulo = linhas[0] if linhas else ""
+    # classe: trecho entre o primeiro " - " e o ":" do titulo (corte-agnostico)
+    m_classe = _TITULO_CLASSE_RE.search(titulo)
+    classe = m_classe.group(1).strip() if m_classe else ""
+    # numero: CNJ se houver (TJ/TRF); senao a designacao apos ":" no titulo
+    #         (STF "ARE 1386809 SP", STJ "AgInt nos EDcl na Rcl 42019 ...");
+    #         fallback final = lawsuitLabel sem o prefixo "Processo ".
+    m_cnj = _CNJ_RE.search(lawsuit_label) or _CNJ_RE.search(titulo)
+    if m_cnj:
+        numero = m_cnj.group(0)
+    else:
+        m_apos = _TITULO_NUM_RE.search(titulo)
+        numero = (m_apos.group(1).strip() if m_apos
+                  else _PROCESSO_PREFIXO.sub("", lawsuit_label).strip())
+    m_rel = _RELATOR_RE.search(top_text)
+    m_julg = _JULGADO_RE.search(top_text)
     # orgao: primeira linha com "·" que nao seja a do Relator
     orgao = ""
-    for linha in (top_text or "").split("\n"):
+    for linha in top_text.split("\n"):
         if "·" in linha and not linha.strip().startswith("Relator"):
             mo = _ORGAO_RE.search(linha)
             if mo:
                 orgao = mo.group(1).strip()
                 break
     return {
-        "numero": m_cnj.group(0) if m_cnj else "",
-        "classe": m_classe.group(1).strip() if m_classe else "",
+        "numero": numero,
+        "classe": classe,
         "relator": m_rel.group(1).strip() if m_rel else "",
         "orgao_julgador": orgao,
         "data_julgamento": m_julg.group(1) if m_julg else "",
@@ -122,13 +142,23 @@ def extrair_inteiro_teor(doc_url: str, *, cdp_url: Optional[str] = None,
         s.wait_ready(extra=2.0)
         meta_raw = s.evaluate(META_JS)
         s.evaluate(CLICK_JS)
-        # Aba carrega via SPA (readyState ja 'complete'); poll por conteudo.
+        # Aba carrega via SPA (readyState ja 'complete'); a sequencia observada e
+        # [stale_pre_clique, 0, 0, teor_cheio, ...]. Espera a URL navegar para
+        # /inteiro-teor- E o tamanho estabilizar (2 leituras iguais) antes de aceitar,
+        # senao capturamos o conteudo stale da aba anterior ou o 0 transitorio.
         after = {}
-        for _ in range(12):
-            time.sleep(0.5)
-            after = s.evaluate(AFTER_JS) or {}
-            if isinstance(after, dict) and len(after.get("text", "")) > 2000:
+        last_len = -1
+        for _ in range(20):
+            time.sleep(0.4)
+            a = s.evaluate(AFTER_JS)
+            if not isinstance(a, dict):
+                continue
+            after = a
+            ln = len(a.get("text", "") or "")
+            url_now = a.get("url", "") or ""
+            if "inteiro-teor" in url_now and ln > 2000 and ln == last_len:
                 break
+            last_len = ln
     if not isinstance(meta_raw, dict):
         meta_raw = {}
     meta = _parse_metadata(meta_raw.get("lawsuitLabel", ""), meta_raw.get("topText", ""))

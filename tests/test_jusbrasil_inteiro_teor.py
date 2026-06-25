@@ -38,6 +38,76 @@ def test_parse_metadata_vazio_nao_inventa():
     assert meta["data_julgamento"] == ""
 
 
+# Dados REAIS capturados de doc-pages STJ e STF (recon cross-court).
+STJ_TOP = (
+    "Superior Tribunal de Justiça STJ - AGRAVO INTERNO NOS EMBARGOS DE DECLARAÇÃO NA RECLAMAÇÃO: AgInt nos EDcl na Rcl 42019 SP 2021/0212311-0\n\n"
+    "Processo AgInt nos EDcl na Rcl 42019 SP 2021/0212311-0\n\n"
+    "STJ · S2 - SEGUNDA SEÇÃO\n"
+    "Relator · Ministro LUIS FELIPE SALOMÃO\n"
+    "Julgado em 15/03/2022\n"
+)
+STJ_LABEL = "Processo AgInt nos EDcl na Rcl 42019 SP 2021/0212311-0"
+
+STF_TOP = (
+    "Supremo Tribunal Federal STF - AG.REG. NO RECURSO EXTRAORDINÁRIO COM AGRAVO: ARE 1386809 SP\n\n"
+    "Processo ARE 1386809 SP\n\n"
+    "STF · Segunda Turma\n"
+    "Relator · EDSON FACHIN\n"
+    "Julgado em 26/09/2022\n"
+)
+STF_LABEL = "Processo ARE 1386809 SP"
+
+
+def test_parse_metadata_stj_numero_e_classe():
+    meta = it._parse_metadata(STJ_LABEL, STJ_TOP)
+    assert meta["classe"] == "AGRAVO INTERNO NOS EMBARGOS DE DECLARAÇÃO NA RECLAMAÇÃO"
+    assert meta["numero"]  # nao vazio (gate required satisfeito)
+    assert "Rcl 42019" in meta["numero"]
+    assert meta["relator"] == "Ministro LUIS FELIPE SALOMÃO"
+    assert meta["orgao_julgador"] == "S2 - SEGUNDA SEÇÃO"
+    assert meta["data_julgamento"] == "15/03/2022"
+
+
+def test_parse_metadata_stf_numero_e_classe():
+    meta = it._parse_metadata(STF_LABEL, STF_TOP)
+    assert meta["classe"] == "AG.REG. NO RECURSO EXTRAORDINÁRIO COM AGRAVO"
+    assert "ARE 1386809" in meta["numero"]
+    assert meta["relator"] == "EDSON FACHIN"
+    assert meta["orgao_julgador"] == "Segunda Turma"
+    assert meta["data_julgamento"] == "26/09/2022"
+
+
+def test_extrair_inteiro_teor_ignora_stale_e_espera_estabilizar(monkeypatch):
+    """Bug do poll: nao pode capturar o conteudo stale pre-clique (2315) nem o 0 transitorio."""
+    seqs = iter([
+        {"url": "https://x/jurisprudencia/stj/123", "text": "S" * 2315},                 # stale, url sem inteiro-teor
+        {"url": "https://x/jurisprudencia/stj/123/inteiro-teor-9", "text": ""},           # rerender (0)
+        {"url": "https://x/jurisprudencia/stj/123/inteiro-teor-9", "text": "EMENTA: T\n" + "y" * 18000},  # cheio
+        {"url": "https://x/jurisprudencia/stj/123/inteiro-teor-9", "text": "EMENTA: T\n" + "y" * 18000},  # estavel (repeticao)
+    ])
+
+    class FakeSession:
+        def __init__(self, *a, **k): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def navigate(self, u): pass
+        def wait_ready(self, extra=1.5): return True
+        def evaluate(self, js, await_promise=False):
+            if "lawsuitLabel" in js:
+                return {"lawsuitLabel": "Processo X", "topText": "Corte X - Classe Y: N"}
+            if ".click()" in js:
+                return "ok"
+            return next(seqs)
+
+    monkeypatch.setattr(it, "JusbrasilCdpSession", FakeSession)
+    monkeypatch.setattr(it, "_throttle", lambda: None)
+    monkeypatch.setattr(it.time, "sleep", lambda *_: None)
+
+    out = it.extrair_inteiro_teor("https://x/jurisprudencia/stj/123")
+    assert len(out["inteiro_teor"]) > 15000  # pegou o teor cheio, nao o stale 2315
+    assert out["url_inteiro_teor"].endswith("inteiro-teor-9")
+
+
 def test_limpar_inteiro_teor_remove_prefixo_de_abas():
     raw = "Resumo\nInteiro Teor\nFatos\nInteiro Teor\n\n\nEMENTA: APELAÇÃO\nbody aqui"
     out = it._limpar_inteiro_teor(raw)
