@@ -18,6 +18,7 @@ from .clients.tjdft import get_client as get_tjdft, BASES_TJDFT
 from .shared import formatar_resultados_texto, ResultadoJuridico
 from .rt import jurisprudencia as rt_juris
 from .rt import delivery as rt_delivery
+from .jusbrasil import jurisprudencia as jb_juris
 
 mcp = FastMCP("juridico-mcp-server")
 
@@ -370,6 +371,57 @@ def rt_baixar_pdf(doc_url: str, destino: str = "") -> str:
     with open(path, "wb") as fh:
         fh.write(data)
     return _json.dumps({"status": "ok", "path": path, "bytes": len(data), "filename": filename}, ensure_ascii=False)
+
+
+# ── Jusbrasil (jurisprudencia agregada, server-only via CDP) ──────────
+
+
+@mcp.tool()
+def jusbrasil_jurisprudencia_buscar(
+    termo: str = "",
+    pagina: int = 1,
+    max_resultados: int = 10,
+) -> str:
+    """Busca jurisprudencia agregada no Jusbrasil (server-only via Chrome dedicado/CDP).
+
+    Cobre o acervo agregado do Jusbrasil (TJs estaduais, TRTs e orgaos pouco
+    cobertos pelas fontes httpx). Requer a aba logada do Chrome dedicado
+    (JUSBRASIL_CDP_URL, default http://127.0.0.1:9222). Le o DOM da pagina de
+    busca; devolve ementa (preview integral, sem corte).
+
+    Args:
+        termo: Texto livre da busca (obrigatorio).
+        pagina: Pagina de resultados (1+, default 1).
+        max_resultados: Limite de resultados (1-30, padrao 10).
+
+    Returns:
+        Jurisprudencia formatada com tribunal, tipo, data, ementa e link.
+    """
+    termo = (termo or "").strip()
+    if not termo:
+        return "Parametro invalido: informe o termo de busca."
+    try:
+        regs = jb_juris.buscar(
+            termo,
+            pagina=max(1, int(pagina)),
+            max_resultados=max(1, min(int(max_resultados), 30)),
+        )
+    except Exception as e:
+        return f"Erro na busca Jusbrasil jurisprudencia: {e}"
+    resultados = [
+        ResultadoJuridico(
+            fonte="jusbrasil",
+            tipo=r.get("tipo") or "jurisprudencia",
+            numero=r.get("numero", ""),
+            orgao=r.get("tribunal", ""),
+            data=r.get("data_publicacao", ""),
+            ementa=r.get("ementa", ""),
+            url=r.get("url", ""),
+            extras={"titulo": r.get("titulo"), "doc_id": r.get("doc_id")},
+        )
+        for r in regs
+    ]
+    return formatar_resultados_texto(resultados, titulo="Jusbrasil — Jurisprudência")
 
 
 # ── Metadados ─────────────────────────────────────────────────────────
