@@ -33,6 +33,7 @@ def cjf_buscar_jurisprudencia(
     busca: str,
     bases: str = "STJ",
     max_resultados: int = 10,
+    completo: bool = False,
 ) -> str:
     """
     Busca jurisprudencia unificada no portal CJF.
@@ -63,6 +64,7 @@ def cjf_buscar_jurisprudencia(
         return formatar_resultados_texto(
             resultados,
             titulo=f"CJF Jurisprudencia [{bases}]",
+            completo=completo,
         )
     except Exception as e:
         return f"Erro na busca CJF: {e}"
@@ -78,6 +80,7 @@ async def stj_buscar_jurisprudencia(
     data_inicial: str = "",
     data_final: str = "",
     max_resultados: int = 10,
+    completo: bool = False,
 ) -> str:
     """
     Busca jurisprudencia no STJ via SCON.
@@ -126,6 +129,7 @@ async def stj_buscar_jurisprudencia(
         return formatar_resultados_texto(
             resultados,
             titulo=f"STJ {tipo}",
+            completo=completo,
         )
     except Exception as e:
         return f"Erro na busca STJ: {e}"
@@ -140,6 +144,7 @@ def bnp_buscar_precedentes(
     orgaos: str = "STF,STJ",
     tipos: str = "RG,RR,SV,SUM",
     max_resultados: int = 10,
+    completo: bool = False,
 ) -> str:
     """
     Busca precedentes qualificados no Banco Nacional de Precedentes (BNP/Pangea).
@@ -180,6 +185,7 @@ def bnp_buscar_precedentes(
             resultados,
             titulo=f"BNP Precedentes [{orgaos}]",
             total=total,
+            completo=completo,
         )
 
         # Adicionar nota sobre situacao
@@ -209,6 +215,7 @@ def tjdft_buscar_jurisprudencia(
     busca: str,
     max_resultados: int = 10,
     sinonimos: bool = True,
+    completo: bool = False,
 ) -> str:
     """
     Busca jurisprudencia no TJDFT via JurisDF.
@@ -240,6 +247,7 @@ def tjdft_buscar_jurisprudencia(
             resultados,
             titulo="TJDFT JurisDF",
             total=total,
+            completo=completo,
         )
     except Exception as e:
         return f"Erro na busca TJDFT: {e}"
@@ -387,13 +395,16 @@ def jusbrasil_jurisprudencia_buscar(
     periodo: str = "qualquer",
     tribunal: str = "",
     tipo: str = "todos",
+    completo: bool = False,
 ) -> str:
     """Busca jurisprudencia agregada no Jusbrasil (server-only via Chrome dedicado/CDP).
 
     Cobre o acervo agregado do Jusbrasil (TJs estaduais, TRTs e orgaos pouco
     cobertos pelas fontes httpx). Requer a aba logada do Chrome dedicado
     (JUSBRASIL_CDP_URL, default http://127.0.0.1:9222). Le o DOM da pagina de
-    busca; devolve ementa (preview integral, sem corte).
+    busca. A ementa sai em PREVIEW truncado (economia de tokens); para o texto
+    integral de um julgado use jusbrasil_inteiro_teor com a URL do resultado, ou
+    completo=True para previews longos na propria lista.
 
     Args:
         termo: Texto livre da busca (obrigatorio).
@@ -440,7 +451,9 @@ def jusbrasil_jurisprudencia_buscar(
         )
         for r in regs
     ]
-    return formatar_resultados_texto(resultados, titulo="Jusbrasil — Jurisprudência")
+    return formatar_resultados_texto(
+        resultados, titulo="Jusbrasil — Jurisprudência", completo=completo
+    )
 
 
 @mcp.tool()
@@ -531,7 +544,7 @@ def listar_fontes() -> str:
    (JUSBRASIL_CDP_URL, default http://127.0.0.1:9222; requer aba logada)
    jusbrasil_jurisprudencia_buscar(termo, pagina, max_resultados, ordenar, periodo, tribunal, tipo)
      Busca no acervo agregado (TJs estaduais, TRTs e orgaos pouco cobertos pelas
-     fontes httpx); texto livre; devolve ementa (preview integral) + link.
+     fontes httpx); texto livre; devolve ementa em preview + link.
      Filtros: ordenar (relevancia/recente), periodo (mes/ano/2anos..),
      tribunal (sigla-familia STF/STJ/TJ/TRF/TRT..), tipo (acordao/sumula)
    jusbrasil_inteiro_teor(doc_url, gravar)
@@ -545,6 +558,10 @@ NOTA: Cada fonte tem sintaxe de busca DIFERENTE.
 - CJF usa: E, OU, NAO, ADJ, PROX
 - BNP usa: +termo, -termo, "frase"
 - STJ e TJDFT: texto livre
+
+ECONOMIA DE TOKENS: as buscas com ementa (CJF/STJ/BNP/TJDFT/Jusbrasil) devolvem
+ementa em PREVIEW truncado por padrao. Use completo=True para o texto longo na
+lista, ou jusbrasil_inteiro_teor para o inteiro teor de um julgado especifico.
 """
 
 

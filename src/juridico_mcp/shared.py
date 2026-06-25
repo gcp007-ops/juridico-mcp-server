@@ -57,14 +57,47 @@ def limpar_html(texto: str) -> str:
     return texto.strip()
 
 
+PREVIEW_CHARS = 500
+
+
+def dedup_resultados(resultados: List[ResultadoJuridico]) -> List[ResultadoJuridico]:
+    """Remove duplicatas por numero (mesmo acordao sob bases distintas — ex.: CJF
+    consultando STF,STJ,TRF). Resultados sem numero sao preservados (nao ha chave
+    confiavel para deduplicar)."""
+    visto = set()
+    out: List[ResultadoJuridico] = []
+    for r in resultados:
+        chave = (r.numero or "").strip()
+        if chave and chave in visto:
+            continue
+        if chave:
+            visto.add(chave)
+        out.append(r)
+    return out
+
+
 def formatar_resultados_texto(
     resultados: List[ResultadoJuridico],
     titulo: str = "Resultados",
     total: int | None = None,
+    *,
+    completo: bool = False,
 ) -> str:
-    """Formata lista de resultados como texto legivel."""
+    """Formata lista de resultados como texto legivel.
+
+    Por padrao (completo=False) a ementa/decisao saem como PREVIEW curto
+    (PREVIEW_CHARS) para economizar tokens — a lista serve para o agente escolher
+    o que aprofundar pela URL/numero. completo=True devolve o texto longo (cap
+    2000/1000), util quando a ementa e o proprio conteudo (CJF/STJ/BNP/TJDFT, que
+    nao tem tool de inteiro teor).
+    """
     if not resultados:
         return f"{titulo}: Nenhum resultado encontrado."
+
+    resultados = dedup_resultados(resultados)
+    cap_ementa = 2000 if completo else PREVIEW_CHARS
+    cap_decisao = 1000 if completo else PREVIEW_CHARS
+    houve_corte = False
 
     total_str = f" (total: {total})" if total else ""
     linhas = [f"{titulo} — {len(resultados)} exibidos{total_str}", ""]
@@ -81,13 +114,24 @@ def formatar_resultados_texto(
         if r.situacao:
             linhas.append(f"   Situacao: {r.situacao}")
         if r.ementa:
-            linhas.append(f"   Ementa: {truncar(r.ementa, 2000)}")
+            em = truncar(r.ementa, cap_ementa)
+            houve_corte = houve_corte or len(r.ementa.strip()) > len(em)
+            rotulo = "Ementa" if completo else "Ementa (preview)"
+            linhas.append(f"   {rotulo}: {em}")
         if r.decisao:
-            linhas.append(f"   Decisao: {truncar(r.decisao, 1000)}")
+            dec = truncar(r.decisao, cap_decisao)
+            houve_corte = houve_corte or len(r.decisao.strip()) > len(dec)
+            linhas.append(f"   Decisao: {dec}")
         if r.url:
             linhas.append(f"   Link: {r.url}")
         for k, v in r.extras.items():
             linhas.append(f"   {k}: {v}")
         linhas.append("")
+
+    if houve_corte and not completo:
+        linhas.append(
+            "Nota: ementas/decisoes truncadas (preview). Reexecute com completo=True "
+            "para o texto integral (ou use a tool de inteiro teor da fonte)."
+        )
 
     return "\n".join(linhas)
