@@ -106,28 +106,50 @@ def normalizar(records: List[dict]) -> List[dict]:
     return out
 
 
-# Ordenacao -> parametro de URL confirmado ao vivo (o=data == mais recente).
-# relevancia e o default do Jusbrasil (sem parametro).
-_ORDEM_PARAM = {"recente": "o=data", "relevancia": ""}
+# Filtros -> parametros de URL Next.js confirmados ao vivo:
+#   ordenacao: o=data (mais recente); relevancia = default (sem param).
+#   periodo:   l=<N>dias (recorte por data); qualquer = default (sem param).
+# Tribunal/tipo sao multi-select com "Filtrar" e nao se refletem como param GET
+# simples (adiado). Ver recon na INI JusbrasilMCP.
+_ORDEM_PARAM = {"recente": "data", "relevancia": ""}
+_PERIODO_L = {
+    "qualquer": "", "mes": "30dias", "ano": "365dias",
+    "2anos": "730dias", "3anos": "1095dias", "5anos": "1825dias",
+}
+_TOKEN_DIAS_RE = re.compile(r"^\d+dias$")
 
 
-def _montar_url(termo: str, pagina: int, ordenar: str = "relevancia") -> str:
+def _periodo_l(periodo: str) -> str:
+    """Resolve o token l= a partir de um apelido amigavel ou de um token cru Ndias."""
+    p = (periodo or "qualquer").lower()
+    if p in _PERIODO_L:
+        return _PERIODO_L[p]
+    return p if _TOKEN_DIAS_RE.match(p) else ""
+
+
+def _montar_url(termo: str, pagina: int, ordenar: str = "relevancia",
+                periodo: str = "qualquer") -> str:
     url = f"{BASE_HOST}/jurisprudencia/busca?q={quote(termo)}"
     if pagina and pagina > 1:
         url += f"&p={pagina}"
     ordem = _ORDEM_PARAM.get((ordenar or "relevancia").lower(), "")
     if ordem:
-        url += f"&{ordem}"
+        url += f"&o={ordem}"
+    el = _periodo_l(periodo)
+    if el:
+        url += f"&l={el}"
     return url
 
 
 def buscar(termo: str, *, pagina: int = 1, max_resultados: int = 10,
-           ordenar: str = "relevancia", cdp_url=None) -> List[dict]:
+           ordenar: str = "relevancia", periodo: str = "qualquer", cdp_url=None) -> List[dict]:
     """Busca jurisprudencia agregada no Jusbrasil (sessao logada via CDP).
 
     ordenar: "relevancia" (default) ou "recente" (mais novos primeiro).
+    periodo: recorte por data — "qualquer" (default), "mes", "ano", "2anos",
+             "3anos", "5anos" (ou token cru tipo "365dias").
     """
-    url = _montar_url(termo, pagina, ordenar)
+    url = _montar_url(termo, pagina, ordenar, periodo)
     records = _session.abrir_dom(url, EXTRACT_JS, cdp_url=cdp_url)
     if not isinstance(records, list):
         return []

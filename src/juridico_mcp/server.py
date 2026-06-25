@@ -384,6 +384,7 @@ def jusbrasil_jurisprudencia_buscar(
     pagina: int = 1,
     max_resultados: int = 10,
     ordenar: str = "relevancia",
+    periodo: str = "qualquer",
 ) -> str:
     """Busca jurisprudencia agregada no Jusbrasil (server-only via Chrome dedicado/CDP).
 
@@ -397,6 +398,8 @@ def jusbrasil_jurisprudencia_buscar(
         pagina: Pagina de resultados (1+, default 1).
         max_resultados: Limite de resultados (1-30, padrao 10).
         ordenar: "relevancia" (default) ou "recente" (mais novos primeiro).
+        periodo: recorte por data — "qualquer" (default), "mes", "ano",
+            "2anos", "3anos", "5anos".
 
     Returns:
         Jurisprudencia formatada com tribunal, tipo, data, ementa e link.
@@ -410,6 +413,7 @@ def jusbrasil_jurisprudencia_buscar(
             pagina=max(1, int(pagina)),
             max_resultados=max(1, min(int(max_resultados), 30)),
             ordenar=ordenar,
+            periodo=periodo,
         )
     except Exception as e:
         return f"Erro na busca Jusbrasil jurisprudencia: {e}"

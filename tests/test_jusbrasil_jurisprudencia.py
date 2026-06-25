@@ -122,3 +122,29 @@ def test_buscar_passa_ordenar_recente(monkeypatch):
     monkeypatch.setattr(jb, "abrir_dom", lambda url, js, **k: cap.update(url=url) or [])
     jur.buscar("x", ordenar="recente")
     assert "o=data" in cap["url"]
+
+
+def test_montar_url_periodo_ano_usa_l_365dias():
+    # Filtro de data confirmado ao vivo: l=365dias -> ultimo ano.
+    assert "l=365dias" in jur._montar_url("x", 1, "relevancia", periodo="ano")
+
+
+def test_montar_url_periodo_qualquer_e_default_sem_l():
+    assert "l=" not in jur._montar_url("x", 1, "relevancia")
+    assert "l=" not in jur._montar_url("x", 1, "relevancia", periodo="qualquer")
+
+
+def test_montar_url_periodo_aceita_token_cru():
+    assert "l=1825dias" in jur._montar_url("x", 1, "relevancia", periodo="1825dias")
+
+
+def test_montar_url_combina_ordenar_e_periodo():
+    u = jur._montar_url("x", 1, "recente", periodo="5anos")
+    assert "o=data" in u and "l=1825dias" in u
+
+
+def test_buscar_passa_periodo(monkeypatch):
+    cap = {}
+    monkeypatch.setattr(jb, "abrir_dom", lambda url, js, **k: cap.update(url=url) or [])
+    jur.buscar("x", periodo="mes")
+    assert "l=30dias" in cap["url"]
