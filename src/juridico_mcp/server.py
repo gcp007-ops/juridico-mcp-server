@@ -18,6 +18,9 @@ from .clients.tjdft import get_client as get_tjdft, BASES_TJDFT
 from .shared import formatar_resultados_texto, ResultadoJuridico
 from .rt import jurisprudencia as rt_juris
 from .rt import delivery as rt_delivery
+from .jusbrasil import jurisprudencia as jb_juris
+from .jusbrasil import inteiro_teor as jb_it
+from .jusbrasil import vault as jb_vault
 
 mcp = FastMCP("juridico-mcp-server")
 
@@ -372,6 +375,118 @@ def rt_baixar_pdf(doc_url: str, destino: str = "") -> str:
     return _json.dumps({"status": "ok", "path": path, "bytes": len(data), "filename": filename}, ensure_ascii=False)
 
 
+# ── Jusbrasil (jurisprudencia agregada, server-only via CDP) ──────────
+
+
+@mcp.tool()
+def jusbrasil_jurisprudencia_buscar(
+    termo: str = "",
+    pagina: int = 1,
+    max_resultados: int = 10,
+    ordenar: str = "relevancia",
+    periodo: str = "qualquer",
+    tribunal: str = "",
+    tipo: str = "todos",
+) -> str:
+    """Busca jurisprudencia agregada no Jusbrasil (server-only via Chrome dedicado/CDP).
+
+    Cobre o acervo agregado do Jusbrasil (TJs estaduais, TRTs e orgaos pouco
+    cobertos pelas fontes httpx). Requer a aba logada do Chrome dedicado
+    (JUSBRASIL_CDP_URL, default http://127.0.0.1:9222). Le o DOM da pagina de
+    busca; devolve ementa (preview integral, sem corte).
+
+    Args:
+        termo: Texto livre da busca (obrigatorio).
+        pagina: Pagina de resultados (1+, default 1).
+        max_resultados: Limite de resultados (1-30, padrao 10).
+        ordenar: "relevancia" (default) ou "recente" (mais novos primeiro).
+        periodo: recorte por data — "qualquer" (default), "mes", "ano",
+            "2anos", "3anos", "5anos".
+        tribunal: sigla-familia para filtrar — "" (todos, default), "STF",
+            "STJ", "TST", "TSE", "STM", "TCU", "TNU", "TRU", "CNJ", "CARF",
+            "TJ", "TRF", "TRT", "TRE", "TJM", "TCE". O filtro e por familia
+            (STJ agrupa seus orgaos; TJ agrupa todos os TJs estaduais).
+        tipo: tipo de julgado — "todos" (default), "acordao", "sumula",
+            "decisao", "sentenca", "despacho".
+
+    Returns:
+        Jurisprudencia formatada com tribunal, tipo, data, ementa e link.
+    """
+    termo = (termo or "").strip()
+    if not termo:
+        return "Parametro invalido: informe o termo de busca."
+    try:
+        regs = jb_juris.buscar(
+            termo,
+            pagina=max(1, int(pagina)),
+            max_resultados=max(1, min(int(max_resultados), 30)),
+            ordenar=ordenar,
+            periodo=periodo,
+            tribunal=tribunal,
+            tipo=tipo,
+        )
+    except Exception as e:
+        return f"Erro na busca Jusbrasil jurisprudencia: {e}"
+    resultados = [
+        ResultadoJuridico(
+            fonte="jusbrasil",
+            tipo=r.get("tipo") or "jurisprudencia",
+            numero=r.get("numero", ""),
+            orgao=r.get("tribunal", ""),
+            data=r.get("data_publicacao", ""),
+            ementa=r.get("ementa", ""),
+            url=r.get("url", ""),
+            extras={"titulo": r.get("titulo"), "doc_id": r.get("doc_id")},
+        )
+        for r in regs
+    ]
+    return formatar_resultados_texto(resultados, titulo="Jusbrasil — Jurisprudência")
+
+
+@mcp.tool()
+def jusbrasil_inteiro_teor(doc_url: str, gravar: bool = False) -> str:
+    """Extrai o inteiro teor de um julgado do Jusbrasil (server-only via CDP).
+
+    Use a URL de um resultado de jusbrasil_jurisprudencia_buscar. Abre o julgado,
+    le os metadados (numero/relator/orgao/data por regex sobre o texto renderizado,
+    robusto a drift de classe CSS), clica a aba "Inteiro Teor" e extrai o texto
+    completo (~27k chars). Gate de seguranca: o resultado nasce citavel=false
+    (jurisprudencia auto-extraida; so humano promove).
+
+    Args:
+        doc_url: URL do julgado (/jurisprudencia/{slug}/{docId}).
+        gravar: Se True, grava nota julgado (Template-Julgado, citavel: false) na
+            vault (requer THINKBOX_VAULT_PATH). Default False (so retorna o payload).
+
+    Returns:
+        JSON. gravar=False: status "ok" + payload (metadados, ementa, inteiro_teor,
+        citavel). gravar=True: "ok"+"path" gravado; "ok_sem_gravacao"+payload+"aviso"
+        quando faltam campos required; "erro"+"mensagem" em falha de extracao.
+    """
+    import json as _json
+    doc_url = (doc_url or "").strip()
+    if not doc_url:
+        return "Parametro invalido: doc_url obrigatoria."
+    try:
+        payload = jb_it.extrair_inteiro_teor(doc_url)
+    except Exception as e:
+        return _json.dumps({"status": "erro", "mensagem": str(e)}, ensure_ascii=False)
+    if not gravar:
+        return _json.dumps({"status": "ok", **payload}, ensure_ascii=False)
+    try:
+        path = jb_vault.escrever_julgado(payload)
+    except ValueError as e:
+        # Required ausente (ex.: numero nao parseado) — devolve o conteudo extraido
+        # + aviso; nada e descartado.
+        return _json.dumps(
+            {"status": "ok_sem_gravacao", "aviso": str(e), **payload},
+            ensure_ascii=False,
+        )
+    except Exception as e:
+        return _json.dumps({"status": "erro", "mensagem": f"falha ao gravar nota: {e}"}, ensure_ascii=False)
+    return _json.dumps({"status": "ok", "path": path, "citavel": payload["citavel"]}, ensure_ascii=False)
+
+
 # ── Metadados ─────────────────────────────────────────────────────────
 
 
@@ -411,6 +526,20 @@ def listar_fontes() -> str:
      na vault (requer THINKBOX_VAULT_PATH); gravar=False retorna so o markdown
    Escopo atual: Jurisprudencia premium. Legislacao/sumulas em versoes futuras.
    Obs: tools RT degradam sem CDP ativo; fontes httpx (CJF/STJ/BNP/TJDFT) intactas.
+
+6. Jusbrasil — jurisprudencia agregada, server-only via Chrome dedicado/CDP
+   (JUSBRASIL_CDP_URL, default http://127.0.0.1:9222; requer aba logada)
+   jusbrasil_jurisprudencia_buscar(termo, pagina, max_resultados, ordenar, periodo, tribunal, tipo)
+     Busca no acervo agregado (TJs estaduais, TRTs e orgaos pouco cobertos pelas
+     fontes httpx); texto livre; devolve ementa (preview integral) + link.
+     Filtros: ordenar (relevancia/recente), periodo (mes/ano/2anos..),
+     tribunal (sigla-familia STF/STJ/TJ/TRF/TRT..), tipo (acordao/sumula)
+   jusbrasil_inteiro_teor(doc_url, gravar)
+     Inteiro teor do julgado (~27k chars) + metadados; gate citavel: false.
+     gravar=True grava nota julgado (Template-Julgado) em THINKBOX_VAULT_PATH;
+     gravar=False (default) retorna so o payload JSON
+   Rate-limit: pausa automatica >=2s entre hits; recomendado <=10-15 por sessao.
+   Obs: degrada sem CDP/sessao logada; fontes httpx intactas.
 
 NOTA: Cada fonte tem sintaxe de busca DIFERENTE.
 - CJF usa: E, OU, NAO, ADJ, PROX
