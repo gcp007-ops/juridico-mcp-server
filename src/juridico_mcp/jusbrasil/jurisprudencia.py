@@ -8,6 +8,7 @@ GraphQL). Seletores parciais ([class*=...]) porque as classes sao hash-sufixadas
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import List
 from urllib.parse import quote, urlparse
 
@@ -106,17 +107,48 @@ def normalizar(records: List[dict]) -> List[dict]:
     return out
 
 
-# Filtros -> parametros de URL Next.js confirmados ao vivo:
+# Filtros -> parametros de URL Next.js confirmados ao vivo (pagina de resultados
+# /jurisprudencia/busca; na landing /jurisprudencia/ os filtros so existem apos
+# uma busca). Recon Claude in Chrome 2026-06-24 confirmou que tribunal/tipo SIM
+# refletem como param GET na pagina de resultados (refuta a hipotese E1 de que
+# eram multi-select sem param). Ver recon na INI JusbrasilMCP.
 #   ordenacao: o=data (mais recente); relevancia = default (sem param).
 #   periodo:   l=<N>dias (recorte por data); qualquer = default (sem param).
-# Tribunal/tipo sao multi-select com "Filtrar" e nao se refletem como param GET
-# simples (adiado). Ver recon na INI JusbrasilMCP.
+#   tribunal:  tribunal=<sigla minuscula> (familia: stj, tj, trf, trt...).
+#   tipo:      jurisType=<token> (acordao, sumula confirmados).
 _ORDEM_PARAM = {"recente": "data", "relevancia": ""}
 _PERIODO_L = {
     "qualquer": "", "mes": "30dias", "ano": "365dias",
     "2anos": "730dias", "3anos": "1095dias", "5anos": "1825dias",
 }
 _TOKEN_DIAS_RE = re.compile(r"^\d+dias$")
+
+# Siglas-familia aceitas pelo filtro de tribunal, observadas no menu "Tribunal"
+# da pagina de resultados. A URL usa a sigla minuscula (tribunal=stj). O filtro e
+# por familia (ex. STJ agrupa 13 orgaos; TJ agrupa todos os TJs estaduais), nao
+# pelo slug granular (tj-ba) usado nos resultados.
+_TRIBUNAL_FILTRO = frozenset({
+    "STF", "STJ", "TST", "TSE", "STM", "TCU", "TNU", "TRU",
+    "CNJ", "CARF", "TJ", "TRF", "TRT", "TRE", "TJM", "TCE",
+})
+
+# Tipo de julgado -> token jurisType. Confirmados ao vivo: acordao, sumula.
+# "todos" = default (sem param). Demais opcoes do menu (Decisoes/Sentencas/
+# Despachos) seguem o mesmo padrao de token unico, mas os tokens exatos nao foram
+# capturados: passam como token cru (mesmo passthrough do periodo Ndias).
+_JURISTYPE_TOKEN = {
+    "todos": "", "qualquer": "",
+    "acordao": "acordao", "acordaos": "acordao",
+    "sumula": "sumula", "sumulas": "sumula",
+}
+_JURISTYPE_CRU_RE = re.compile(r"^[a-z]+$")
+
+
+def _sem_acento(s: str) -> str:
+    """Normaliza para minuscula ASCII (remove acentos), preservando o resto."""
+    s = (s or "").strip().lower()
+    return "".join(c for c in unicodedata.normalize("NFD", s)
+                   if unicodedata.category(c) != "Mn")
 
 
 def _periodo_l(periodo: str) -> str:
@@ -127,8 +159,33 @@ def _periodo_l(periodo: str) -> str:
     return p if _TOKEN_DIAS_RE.match(p) else ""
 
 
+def _tribunal_param(tribunal: str) -> str:
+    """Resolve o token tribunal= a partir de uma sigla-familia. Vazio/qualquer =
+    sem filtro. Sigla fora do conjunto observado levanta ValueError (nao busca
+    sem filtro silenciosamente)."""
+    t = (tribunal or "").strip().upper()
+    if not t or t in ("QUALQUER", "TODOS"):
+        return ""
+    if t in _TRIBUNAL_FILTRO:
+        return t.lower()
+    raise ValueError(
+        f"tribunal desconhecido: {tribunal!r}. Use uma sigla-familia: "
+        + ", ".join(sorted(_TRIBUNAL_FILTRO))
+    )
+
+
+def _juris_type(tipo: str) -> str:
+    """Resolve o token jurisType= a partir de um apelido amigavel (acordao/sumula)
+    ou token cru. Vazio/todos = sem filtro."""
+    t = _sem_acento(tipo or "todos")
+    if t in _JURISTYPE_TOKEN:
+        return _JURISTYPE_TOKEN[t]
+    return t if _JURISTYPE_CRU_RE.match(t) else ""
+
+
 def _montar_url(termo: str, pagina: int, ordenar: str = "relevancia",
-                periodo: str = "qualquer") -> str:
+                periodo: str = "qualquer", tribunal: str = "",
+                tipo: str = "todos") -> str:
     url = f"{BASE_HOST}/jurisprudencia/busca?q={quote(termo)}"
     if pagina and pagina > 1:
         url += f"&p={pagina}"
@@ -138,18 +195,27 @@ def _montar_url(termo: str, pagina: int, ordenar: str = "relevancia",
     el = _periodo_l(periodo)
     if el:
         url += f"&l={el}"
+    trib = _tribunal_param(tribunal)
+    if trib:
+        url += f"&tribunal={trib}"
+    jtype = _juris_type(tipo)
+    if jtype:
+        url += f"&jurisType={jtype}"
     return url
 
 
 def buscar(termo: str, *, pagina: int = 1, max_resultados: int = 10,
-           ordenar: str = "relevancia", periodo: str = "qualquer", cdp_url=None) -> List[dict]:
+           ordenar: str = "relevancia", periodo: str = "qualquer",
+           tribunal: str = "", tipo: str = "todos", cdp_url=None) -> List[dict]:
     """Busca jurisprudencia agregada no Jusbrasil (sessao logada via CDP).
 
     ordenar: "relevancia" (default) ou "recente" (mais novos primeiro).
     periodo: recorte por data — "qualquer" (default), "mes", "ano", "2anos",
              "3anos", "5anos" (ou token cru tipo "365dias").
+    tribunal: sigla-familia para filtrar (ex. "STJ", "TJ", "TRF"); "" = todos.
+    tipo: tipo de julgado — "todos" (default), "acordao", "sumula" (ou token cru).
     """
-    url = _montar_url(termo, pagina, ordenar, periodo)
+    url = _montar_url(termo, pagina, ordenar, periodo, tribunal, tipo)
     records = _session.abrir_dom(url, EXTRACT_JS, cdp_url=cdp_url)
     if not isinstance(records, list):
         return []

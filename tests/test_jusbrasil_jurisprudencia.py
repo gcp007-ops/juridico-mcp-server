@@ -148,3 +148,71 @@ def test_buscar_passa_periodo(monkeypatch):
     monkeypatch.setattr(jb, "abrir_dom", lambda url, js, **k: cap.update(url=url) or [])
     jur.buscar("x", periodo="mes")
     assert "l=30dias" in cap["url"]
+
+
+# --- Filtro de tribunal (param tribunal=<sigla minuscula>) confirmado ao vivo ---
+
+def test_montar_url_tribunal_stj_usa_sigla_minuscula():
+    # Chrome recon: selecionar STJ na pagina de resultados gera tribunal=stj.
+    assert "tribunal=stj" in jur._montar_url("x", 1, tribunal="STJ")
+
+
+def test_montar_url_tribunal_aceita_minuscula_na_entrada():
+    assert "tribunal=tst" in jur._montar_url("x", 1, tribunal="tst")
+
+
+def test_montar_url_tribunal_qualquer_e_default_sem_param():
+    assert "tribunal=" not in jur._montar_url("x", 1)
+    assert "tribunal=" not in jur._montar_url("x", 1, tribunal="qualquer")
+    assert "tribunal=" not in jur._montar_url("x", 1, tribunal="")
+
+
+def test_montar_url_tribunal_desconhecido_levanta():
+    # Sigla fora do conjunto-familia observado: erro explicito, nao busca sem filtro.
+    import pytest
+    with pytest.raises(ValueError):
+        jur._montar_url("x", 1, tribunal="TJBA")  # TJBA e slug, nao familia; familia e TJ
+
+
+def test_buscar_passa_tribunal(monkeypatch):
+    cap = {}
+    monkeypatch.setattr(jb, "abrir_dom", lambda url, js, **k: cap.update(url=url) or [])
+    jur.buscar("x", tribunal="STF")
+    assert "tribunal=stf" in cap["url"]
+
+
+# --- Filtro de tipo de julgado (param jurisType=<token>) ---
+
+def test_montar_url_tipo_acordao_usa_juristype_acordao():
+    # Confirmado ao vivo: Acordaos -> jurisType=acordao.
+    assert "jurisType=acordao" in jur._montar_url("x", 1, tipo="acordao")
+
+
+def test_montar_url_tipo_aceita_acento_e_sumula():
+    # Confirmado ao vivo: Sumulas -> jurisType=sumula. Entrada com acento normaliza.
+    assert "jurisType=sumula" in jur._montar_url("x", 1, tipo="Súmula")
+    assert "jurisType=acordao" in jur._montar_url("x", 1, tipo="Acórdão")
+
+
+def test_montar_url_tipo_todos_e_default_sem_param():
+    assert "jurisType=" not in jur._montar_url("x", 1)
+    assert "jurisType=" not in jur._montar_url("x", 1, tipo="todos")
+    assert "jurisType=" not in jur._montar_url("x", 1, tipo="")
+
+
+def test_montar_url_tipo_aceita_token_cru():
+    # Demais opcoes do menu seguem o mesmo padrao de token unico (nao capturados):
+    # passam como token cru, igual ao passthrough de periodo.
+    assert "jurisType=decisao" in jur._montar_url("x", 1, tipo="decisao")
+
+
+def test_montar_url_combina_tribunal_e_tipo():
+    u = jur._montar_url("x", 1, tribunal="STJ", tipo="acordao")
+    assert "tribunal=stj" in u and "jurisType=acordao" in u
+
+
+def test_buscar_passa_tipo(monkeypatch):
+    cap = {}
+    monkeypatch.setattr(jb, "abrir_dom", lambda url, js, **k: cap.update(url=url) or [])
+    jur.buscar("x", tipo="acordao")
+    assert "jurisType=acordao" in cap["url"]

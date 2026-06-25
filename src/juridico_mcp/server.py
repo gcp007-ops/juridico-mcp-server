@@ -385,6 +385,8 @@ def jusbrasil_jurisprudencia_buscar(
     max_resultados: int = 10,
     ordenar: str = "relevancia",
     periodo: str = "qualquer",
+    tribunal: str = "",
+    tipo: str = "todos",
 ) -> str:
     """Busca jurisprudencia agregada no Jusbrasil (server-only via Chrome dedicado/CDP).
 
@@ -400,6 +402,11 @@ def jusbrasil_jurisprudencia_buscar(
         ordenar: "relevancia" (default) ou "recente" (mais novos primeiro).
         periodo: recorte por data — "qualquer" (default), "mes", "ano",
             "2anos", "3anos", "5anos".
+        tribunal: sigla-familia para filtrar — "" (todos, default), "STF",
+            "STJ", "TST", "TSE", "STM", "TCU", "TNU", "TRU", "CNJ", "CARF",
+            "TJ", "TRF", "TRT", "TRE", "TJM", "TCE". O filtro e por familia
+            (STJ agrupa seus orgaos; TJ agrupa todos os TJs estaduais).
+        tipo: tipo de julgado — "todos" (default), "acordao", "sumula".
 
     Returns:
         Jurisprudencia formatada com tribunal, tipo, data, ementa e link.
@@ -414,6 +421,8 @@ def jusbrasil_jurisprudencia_buscar(
             max_resultados=max(1, min(int(max_resultados), 30)),
             ordenar=ordenar,
             periodo=periodo,
+            tribunal=tribunal,
+            tipo=tipo,
         )
     except Exception as e:
         return f"Erro na busca Jusbrasil jurisprudencia: {e}"
@@ -519,9 +528,11 @@ def listar_fontes() -> str:
 
 6. Jusbrasil — jurisprudencia agregada, server-only via Chrome dedicado/CDP
    (JUSBRASIL_CDP_URL, default http://127.0.0.1:9222; requer aba logada)
-   jusbrasil_jurisprudencia_buscar(termo, pagina, max_resultados)
+   jusbrasil_jurisprudencia_buscar(termo, pagina, max_resultados, ordenar, periodo, tribunal, tipo)
      Busca no acervo agregado (TJs estaduais, TRTs e orgaos pouco cobertos pelas
-     fontes httpx); texto livre; devolve ementa (preview integral) + link
+     fontes httpx); texto livre; devolve ementa (preview integral) + link.
+     Filtros: ordenar (relevancia/recente), periodo (mes/ano/2anos..),
+     tribunal (sigla-familia STF/STJ/TJ/TRF/TRT..), tipo (acordao/sumula)
    jusbrasil_inteiro_teor(doc_url, gravar)
      Inteiro teor do julgado (~27k chars) + metadados; gate citavel: false.
      gravar=True grava nota julgado (Template-Julgado) em THINKBOX_VAULT_PATH;
