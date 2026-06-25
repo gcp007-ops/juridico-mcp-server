@@ -11,7 +11,7 @@ import httpx
 from urllib.parse import urlencode
 from tenacity import retry, wait_exponential, stop_after_attempt
 from typing import List, Optional
-from ..shared import ResultadoJuridico, limpar_html
+from ..shared import ResultadoJuridico
 
 CJF_URL = "https://jurisprudencia.cjf.jus.br/unificada/index.xhtml"
 

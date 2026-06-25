@@ -12,9 +12,14 @@ Nao invoca skills.
 from __future__ import annotations
 
 import datetime
-import os
 import re
-import unicodedata
+
+from ..vault_common import (
+    esc_yaml as _esc,
+    exigir_required,
+    escrever_nota,
+    slug_ascii as _slug,
+)
 
 SUBPASTA = ("Conhecimento", "Fontes", "Julgados", "Jusbrasil")
 _REQUIRED = ("tribunal", "classe", "numero")
@@ -22,13 +27,8 @@ _ITEM_NUM_RE = re.compile(r"(?m)^(\s*\d+)\.")
 
 
 def slug_ascii(texto: str, max_len: int = 80) -> str:
-    sem = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode()
-    sem = re.sub(r"[^a-zA-Z0-9]+", "-", sem).strip("-")
-    return (sem[:max_len].rstrip("-")) or "julgado"
-
-
-def _esc(v: str) -> str:
-    return str(v).replace("\\", "\\\\").replace('"', '\\"')
+    # Jusbrasil preserva o case (lower=False) e usa max_len=80.
+    return _slug(texto, max_len, lower=False)
 
 
 def _escapar_itens_numerados(texto: str) -> str:
@@ -98,19 +98,7 @@ def montar_corpo(meta: dict) -> str:
 
 
 def escrever_julgado(meta: dict, *, base_path=None, created: str = "") -> str:
-    faltando = [c for c in _REQUIRED if not meta.get(c)]
-    if faltando:
-        raise ValueError(f"julgado: campos required ausentes: {', '.join(faltando)}")
-    base = base_path or os.environ.get("THINKBOX_VAULT_PATH", "")
-    if not base or not base.strip():
-        raise ValueError(
-            "THINKBOX_VAULT_PATH nao configurado: defina o caminho da vault (server-side) ou passe base_path"
-        )
-    pasta = os.path.join(base, *SUBPASTA)
-    os.makedirs(pasta, exist_ok=True)
+    exigir_required(meta, _REQUIRED)
     nome = slug_ascii(f'{meta["tribunal"]} - {meta["classe"]} {meta["numero"]}')
-    path = os.path.join(pasta, f"{nome}.md")
     conteudo = montar_frontmatter(meta, created=created) + montar_corpo(meta).strip() + "\n"
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(conteudo)
-    return path
+    return escrever_nota(SUBPASTA, nome, conteudo, base_path=base_path)
