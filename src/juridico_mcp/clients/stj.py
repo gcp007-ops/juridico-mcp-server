@@ -18,10 +18,28 @@ from ..shared import ResultadoJuridico, limpar_html
 
 STJ_BASE = "https://scon.stj.jus.br/SCON"
 
-# Tempo de espera para Cloudflare challenge (segundos)
-_CF_WAIT = 12
-# Tempo de espera para resultados carregarem
-_RESULT_WAIT = 8
+# Timeouts de POLLING (segundos): aguarda a condicao em vez de sleep fixo.
+# Sleeps fixos curtos capturavam a pagina ainda em branco -> "0 resultados".
+_CF_WAIT = 15      # ate o form de busca aparecer (Cloudflare/JS)
+_RESULT_WAIT = 20  # ate os resultados (div.documento) carregarem
+
+
+async def _poll(page, expr_js: str, timeout: float, intervalo: float = 0.5):
+    """Polla expr_js ate retornar truthy ou estourar o timeout; devolve o ultimo valor.
+
+    Robustez sobre sleep fixo: encerra assim que a condicao e satisfeita (rapido
+    quando pronto) e tem teto previsivel quando nao ha resultado."""
+    ultimo = None
+    import asyncio as _asyncio
+    for _ in range(max(1, int(timeout / intervalo))):
+        try:
+            ultimo = await page.evaluate(expr_js)
+        except Exception:
+            ultimo = None
+        if ultimo:
+            return ultimo
+        await _asyncio.sleep(intervalo)
+    return ultimo
 
 
 def _normalizar_busca(texto: str) -> str:
@@ -104,7 +122,17 @@ class STJClient:
         try:
             # Navegar para a pagina principal (resolve Cloudflare)
             page = await browser.get(f"{STJ_BASE}/")
-            await asyncio.sleep(_CF_WAIT)
+            # Polling do form (em vez de sleep fixo): so prossegue quando o campo existe.
+            tem_form = await _poll(
+                page,
+                "!!document.getElementById('frmConsulta') "
+                "&& !!document.querySelector('input[name=\"livre\"]')",
+                _CF_WAIT,
+            )
+            if not tem_form:
+                raise RuntimeError(
+                    "STJ SCON: formulario de busca nao carregou (Cloudflare/layout/timeout)."
+                )
 
             # Preencher formulario e submeter via JavaScript
             # O form frmConsulta tem campos hidden: livre, b, data, etc.
@@ -124,7 +152,15 @@ class STJClient:
                     form.submit();
                 }})();
             ''')
-            await asyncio.sleep(_RESULT_WAIT)
+            # Polling dos resultados: encerra quando div.documento aparece OU quando a
+            # pagina sinaliza busca sem resultados (evita capturar a pagina em branco).
+            await _poll(
+                page,
+                "document.querySelectorAll('div.documento').length > 0 "
+                "|| /n[ãa]o encontrou|nenhum documento|0 documento/i.test("
+                "document.body ? document.body.innerText : '')",
+                _RESULT_WAIT,
+            )
 
             # Obter HTML da pagina de resultados
             content = await page.get_content()
