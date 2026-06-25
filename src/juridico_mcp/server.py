@@ -19,6 +19,8 @@ from .shared import formatar_resultados_texto, ResultadoJuridico
 from .rt import jurisprudencia as rt_juris
 from .rt import delivery as rt_delivery
 from .jusbrasil import jurisprudencia as jb_juris
+from .jusbrasil import inteiro_teor as jb_it
+from .jusbrasil import vault as jb_vault
 
 mcp = FastMCP("juridico-mcp-server")
 
@@ -422,6 +424,50 @@ def jusbrasil_jurisprudencia_buscar(
         for r in regs
     ]
     return formatar_resultados_texto(resultados, titulo="Jusbrasil — Jurisprudência")
+
+
+@mcp.tool()
+def jusbrasil_inteiro_teor(doc_url: str, gravar: bool = False) -> str:
+    """Extrai o inteiro teor de um julgado do Jusbrasil (server-only via CDP).
+
+    Use a URL de um resultado de jusbrasil_jurisprudencia_buscar. Abre o julgado,
+    le os metadados (numero/relator/orgao/data por regex sobre o texto renderizado,
+    robusto a drift de classe CSS), clica a aba "Inteiro Teor" e extrai o texto
+    completo (~27k chars). Gate de seguranca: o resultado nasce citavel=false
+    (jurisprudencia auto-extraida; so humano promove).
+
+    Args:
+        doc_url: URL do julgado (/jurisprudencia/{slug}/{docId}).
+        gravar: Se True, grava nota julgado (Template-Julgado, citavel: false) na
+            vault (requer THINKBOX_VAULT_PATH). Default False (so retorna o payload).
+
+    Returns:
+        JSON. gravar=False: status "ok" + payload (metadados, ementa, inteiro_teor,
+        citavel). gravar=True: "ok"+"path" gravado; "ok_sem_gravacao"+payload+"aviso"
+        quando faltam campos required; "erro"+"mensagem" em falha de extracao.
+    """
+    import json as _json
+    doc_url = (doc_url or "").strip()
+    if not doc_url:
+        return "Parametro invalido: doc_url obrigatoria."
+    try:
+        payload = jb_it.extrair_inteiro_teor(doc_url)
+    except Exception as e:
+        return _json.dumps({"status": "erro", "mensagem": str(e)}, ensure_ascii=False)
+    if not gravar:
+        return _json.dumps({"status": "ok", **payload}, ensure_ascii=False)
+    try:
+        path = jb_vault.escrever_julgado(payload)
+    except ValueError as e:
+        # Required ausente (ex.: numero nao parseado) — devolve o conteudo extraido
+        # + aviso; nada e descartado.
+        return _json.dumps(
+            {"status": "ok_sem_gravacao", "aviso": str(e), **payload},
+            ensure_ascii=False,
+        )
+    except Exception as e:
+        return _json.dumps({"status": "erro", "mensagem": f"falha ao gravar nota: {e}"}, ensure_ascii=False)
+    return _json.dumps({"status": "ok", "path": path, "citavel": payload["citavel"]}, ensure_ascii=False)
 
 
 # ── Metadados ─────────────────────────────────────────────────────────
